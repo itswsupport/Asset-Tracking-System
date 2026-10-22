@@ -66,7 +66,10 @@ public class AmsLoginAccess {
 	@Column(name = "emp_name")
 	private String empName;
 
-	/** ADMIN, USER or VIEWER — the exact strings the frontend's ROLES uses. */
+	/**
+	 * USER, ADMIN, ADMIN,USER (both) or VIEWER — the exact strings the frontend's ROLES uses.
+	 * Always checked and ordered by AmsRoles.normalise; VIEWER is never combined.
+	 */
 	@Column(name = "role", nullable = false, length = 20)
 	private String role;
 

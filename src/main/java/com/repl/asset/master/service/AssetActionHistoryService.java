@@ -97,6 +97,7 @@ public class AssetActionHistoryService {
 		AssetActionHistory row = new AssetActionHistory();
 		row.setAssetId(assetId);
 		apply(row, in);
+		copyPlace(row, assetId);
 
 		row.setCreateDate(LocalDate.now());
 		row.setCreateTime(LocalTime.now().withNano(0));
@@ -107,6 +108,20 @@ public class AssetActionHistoryService {
 		AssetActionHistory saved = repository.save(row);
 		stampMaster(assetId);
 		return toBO(saved);
+	}
+
+	/**
+	 * THE PLANT AND LOCATION THE MACHINE IS IN NOW, copied onto a NEW entry only.
+	 *
+	 * The device is saved before its history (a plant transfer saves the new plant first), so the
+	 * new holder's row gets the plant they received it in. update() never calls this: releasing
+	 * the previous holder keeps the plant they had it in, not the one it is moving to.
+	 */
+	private void copyPlace(AssetActionHistory row, Long assetId) {
+		assetMasterRepository.findById(assetId).ifPresent(asset -> {
+			row.setPlant(trimToNull(asset.getPlant()));
+			row.setLocation(trimToNull(asset.getLocation()));
+		});
 	}
 
 	/**
@@ -176,7 +191,7 @@ public class AssetActionHistoryService {
 	 * An entry with no date at all sorts to the bottom rather than jumping to the top, and two
 	 * moves on one day settle in the order they were recorded.
 	 *
-	 * The holder is stamped too, so ams_add_device_master.employee_code cannot drift from the
+	 * The holder is stamped too, so ams_add_device_master.assigned_employee_code cannot drift from the
 	 * log — except where the newest entry names nobody, when whatever the machine already held
 	 * is left alone rather than being blanked.
 	 */
@@ -309,6 +324,8 @@ public class AssetActionHistoryService {
 		AssetActionHistoryBO bo = new AssetActionHistoryBO();
 		bo.setId(row.getId());
 		bo.setAsset_id(row.getAssetId());
+		bo.setPlant(row.getPlant());
+		bo.setLocation(row.getLocation());
 		bo.setAssigned_emp_code(row.getAssignedEmpCode());
 		bo.setAssigned_emp_name(row.getAssignedEmpName());
 		bo.setStart_date(row.getStartDate());

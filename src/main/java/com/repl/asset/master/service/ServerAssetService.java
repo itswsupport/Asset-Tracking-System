@@ -60,6 +60,7 @@ public class ServerAssetService {
 	public ServerAssetBO save(ServerAssetBO in) throws ApplicationException {
 		String name = requireName(in);
 		BigDecimal years = requireYears(in);
+		Long regBy = requireRegBy(in);
 
 		ServerWithIpMaster existing = findIncludingDeleted(name);
 
@@ -75,6 +76,7 @@ public class ServerAssetService {
 			}
 			apply(existing, in, name, years);
 			stamp(existing);
+			existing.setRegBy(regBy);
 			existing.setAddedVia(addedVia(in));
 			return toBO(repository.save(existing));
 		}
@@ -82,6 +84,7 @@ public class ServerAssetService {
 		ServerWithIpMaster row = new ServerWithIpMaster();
 		apply(row, in, name, years);
 		stamp(row);
+		row.setRegBy(regBy);
 		row.setAddedVia(addedVia(in));
 
 		return toBO(repository.save(row));
@@ -221,6 +224,20 @@ public class ServerAssetService {
 		row.setCreateDate(LocalDate.now());
 		row.setCreateTime(LocalTime.now().withNano(0));
 		row.setRegTime(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")));
+	}
+
+	/**
+	 * REG_BY — the employee code of whoever is adding the server, as ADD SERVER / BULK UPLOAD
+	 * send it (changed_by_code). Required: a server is never saved without who added it. Set
+	 * only when a server is added; an edit never changes it.
+	 */
+	private Long requireRegBy(ServerAssetBO in) throws ApplicationException {
+		String code = in == null ? null : trimToNull(in.getChanged_by_code());
+		if (code == null || !code.matches("\\d{1,18}")) {
+			throw new ApplicationException(IResponseCode.INVALID_DATA,
+					"Could not identify who is adding this server. Please log in again.");
+		}
+		return Long.valueOf(code);
 	}
 
 	private String requireName(ServerAssetBO in) throws ApplicationException {

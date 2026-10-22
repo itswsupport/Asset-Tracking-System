@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.repl.asset.constant.Constants;
 import com.repl.asset.exception.ApplicationException;
 import com.repl.asset.master.bo.CategoryBO;
+import com.repl.asset.login.AmsRoles;
 import com.repl.asset.login.model.AmsLoginAccess;
 import com.repl.asset.login.model.EmpDetailsMaster;
 import com.repl.asset.login.repository.AmsLoginAccessRepository;
@@ -740,11 +741,33 @@ public class MasterServiceImpl implements IMasterService {
 		String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"));
 
 		/*
-		 * Upsert, not insert: emp_code is UNIQUE, so re-assigning someone who already has
-		 * access updates their row rather than failing on the constraint. Saving the role IS
-		 * granting the access — one row, one write, nothing to drift out of step.
+		 * ONE ENTRY PER EMPLOYEE, and SAVE only ADDS one. emp_code is UNIQUE; overwriting an
+		 * existing row here would silently replace that person's plants, device types and role
+		 * (1002, 1003 lost for the 1006 picked now). So someone who already has access is
+		 * refused — their own row is changed through UPDATE (Edit on the Reporting Person list).
 		 */
-		AmsLoginAccess row = amsLoginAccessRepository.findByEmpCode(employee.getEmpCode())
+		Optional<AmsLoginAccess> already = amsLoginAccessRepository.findByEmpCode(employee.getEmpCode());
+		/*
+		 * A DELETED entry (status -1 — DELETE only marks the row) is not access any more: the
+		 * employee may be ADDED again, and that row is reused below as a fresh grant (new plants,
+		 * types and role, active, dated today). Only a live entry — Active or Inactive, both on
+		 * the Reporting Person list — refuses the ADD.
+		 */
+		if (already.isPresent() && already.get().getStatus() == Constants.STATUS_DELETED) {
+			AmsLoginAccess revived = already.get();
+			revived.setRegDate(today);
+			revived.setRegTime(now);
+			revived.setCreateDate(LocalDate.now());
+			revived.setCreateTime(LocalTime.now().withNano(0));
+		} else if (already.isPresent()) {
+			AmsLoginAccess a = already.get();
+			// "(USER, plant 1002, 1003)" — or just "(USER)" when the row has no plant recorded.
+			String plants = a.getPlantCodeList().isEmpty() ? "" : ", plant " + String.join(", ", a.getPlantCodeList());
+			throw new ApplicationException(IResponseCode.EXISTING_ENTITY,
+					employee.getEmpCode() + " already has AMS access (" + a.getRole() + plants
+							+ "). Edit their existing access to add a plant, device type or role.");
+		}
+		AmsLoginAccess row = already
 				.orElseGet(() -> {
 					AmsLoginAccess fresh = new AmsLoginAccess();
 					fresh.setEmpCode(employee.getEmpCode());
@@ -765,7 +788,8 @@ public class MasterServiceImpl implements IMasterService {
 		String first = employee.getEmpFname() == null ? "" : employee.getEmpFname().trim();
 		String last = employee.getEmpLname() == null ? "" : employee.getEmpLname().trim();
 		row.setEmpName((first + " " + last).trim());
-		row.setRole(in.getRole());
+		// "USER", "ADMIN", "ADMIN,USER" or "VIEWER" — checked and put in order (AmsRoles).
+		row.setRole(AmsRoles.normalise(in.getRole()));
 		row.setDescription(in.getDescription());
 		// Active unless the form says otherwise. Inactive means the assignment is on record
 		// but the person cannot sign in — login filters on status = 1.
@@ -826,7 +850,8 @@ public class MasterServiceImpl implements IMasterService {
 		row.setCompanyName(in.getCompany_name());
 		row.setPlantCode(plantCodes);
 		row.setDeviceIds(deviceIds);
-		row.setRole(in.getRole());
+		// "USER", "ADMIN", "ADMIN,USER" or "VIEWER" — checked and put in order (AmsRoles).
+		row.setRole(AmsRoles.normalise(in.getRole()));
 		row.setDescription(in.getDescription());
 		if (in.getStatus() != null) {
 			row.setStatus(in.getStatus() == Constants.STATUS_INACTIVE

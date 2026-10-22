@@ -130,11 +130,30 @@ public class AssetMaster {
 		this.expServiceCode = expServiceCode;
 	}
 
-	@Column(name = "employee_code", length = 50)
+	/** ASSIGNED EMPLOYEE CODE — the code of the employee who holds the device now (was employee_code). */
+	@Column(name = "assigned_employee_code", length = 50)
 	private String employeeCode;
 
-	@Column(name = "employee_name", length = 150)
+	/** ASSIGNED TO — the employee who holds the device now (was employee_name). */
+	@Column(name = "assigned_to_employee", length = 150)
 	private String employeeName;
+
+	/**
+	 * ADDED BY — the signed-in employee who first submitted this device (ADD DEVICE or BULK
+	 * UPLOAD). Set once when the device is added; a later edit never changes it.
+	 */
+	/**
+	 * AGE as YEAR.MONTH ("5.01" = 5 years 1 month), as the ADD DEVICE form shows it. Saved on
+	 * every add / edit and refreshed daily by AgeRefreshJob, since it changes as months pass.
+	 */
+	@Column(name = "age", length = 10)
+	private String age;
+
+	@Column(name = "added_by_emp_code", nullable = false, length = 50)
+	private String addedByEmpCode;
+
+	@Column(name = "added_by_emp_name", nullable = false, length = 150)
+	private String addedByEmpName;
 
 	@Column(name = "processor", length = 200)
 	private String processor;
@@ -452,6 +471,30 @@ public class AssetMaster {
 
 	public void setEmployeeName(String employeeName) {
 		this.employeeName = employeeName;
+	}
+
+	public String getAge() {
+		return age;
+	}
+
+	public void setAge(String age) {
+		this.age = age;
+	}
+
+	public String getAddedByEmpCode() {
+		return addedByEmpCode;
+	}
+
+	public void setAddedByEmpCode(String addedByEmpCode) {
+		this.addedByEmpCode = addedByEmpCode;
+	}
+
+	public String getAddedByEmpName() {
+		return addedByEmpName;
+	}
+
+	public void setAddedByEmpName(String addedByEmpName) {
+		this.addedByEmpName = addedByEmpName;
 	}
 
 	public String getExternalProcessor() {

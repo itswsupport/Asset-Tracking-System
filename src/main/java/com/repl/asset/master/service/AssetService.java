@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.repl.asset.constant.Constants;
 import com.repl.asset.exception.ApplicationException;
+import com.repl.asset.login.AmsRoles;
 import com.repl.asset.login.model.AmsLoginAccess;
 import com.repl.asset.login.repository.AmsLoginAccessRepository;
 import com.repl.asset.master.bo.AssetBO;
@@ -107,6 +108,11 @@ public class AssetService {
 		String name = requireName(in);
 		BigDecimal years = requireYears(in);
 		checkScope(in, device, null);
+		// Checked before anything is written: a device is never saved without who added it.
+		if (trimToNull(in.getChanged_by_code()) == null) {
+			throw new ApplicationException(IResponseCode.INVALID_DATA,
+					"Could not identify who is adding this device. Please log in again.");
+		}
 
 		AssetMaster existing = findIncludingDeleted(device.getId(), name);
 
@@ -140,7 +146,9 @@ public class AssetService {
 								+ ". Open it from Open / Assigned Devices to change it.");
 			}
 			apply(existing, in, device, name, years);
+			existing.setAge(ageYearMonth(existing, LocalDate.now()));
 			stamp(existing);
+			setAddedBy(existing, in);
 			existing.setAddedVia(addedVia(in));
 			assignReference(existing, device);
 			AssetMaster savedExisting = assetMasterRepository.save(existing);
@@ -151,7 +159,9 @@ public class AssetService {
 
 		AssetMaster row = new AssetMaster();
 		apply(row, in, device, name, years);
+		row.setAge(ageYearMonth(row, LocalDate.now()));
 		stamp(row);
+		setAddedBy(row, in);
 		row.setAddedVia(addedVia(in));
 		assignReference(row, device);
 
@@ -198,6 +208,7 @@ public class AssetService {
 		}
 
 		apply(row, in, device, name, years);
+		row.setAge(ageYearMonth(row, LocalDate.now()));
 		// A machine saved before reference numbers existed gets one the first time it is edited.
 		assignReference(row, device);
 		AssetMaster saved = assetMasterRepository.save(row);
@@ -331,9 +342,10 @@ public class AssetService {
 	}
 
 	/**
-	 * A USER's scope, from their Reporting Person row: they may save only the device types and
-	 * the plant set for them there. ADMIN and VIEWER are not limited. Each part is enforced only
-	 * when it is set, so a USER given no device types or no plant is not locked out entirely.
+	 * PLANT-WISE ACCESS, from the saver's Reporting Person row: a USER and an ADMIN (alone, or
+	 * ADMIN,USER) alike may save only the device types and the plant(s) set for them there. A
+	 * VIEWER may not save or change devices at all — view only. Each part is enforced only when
+	 * it is set, so someone given no device types or no plant is not locked out entirely.
 	 *
 	 * The saver is the changed_by_code the form sends with every save and update.
 	 */
@@ -345,9 +357,15 @@ public class AssetService {
 		AmsLoginAccess access = amsLoginAccessRepository
 				.findByEmpCodeAndStatus(Long.valueOf(code), Constants.STATUS_ACTIVE)
 				.orElse(null);
-		if (access == null || !"USER".equalsIgnoreCase(access.getRole())) {
+		if (access == null) {
 			return;
 		}
+		// VIEWER is view only: refused here as well as on screen, so the API cannot be used around it.
+		if (AmsRoles.has(access.getRole(), AmsRoles.VIEWER)) {
+			throw new ApplicationException(IResponseCode.INVALID_DATA,
+					"You have view-only access. Devices cannot be added or changed.");
+		}
+		// USER and ADMIN: both limited to their own plant(s) and device types below.
 		List<Long> allowed = access.getDeviceIdList();
 		if (!allowed.isEmpty() && !allowed.contains(device.getId())) {
 			throw new ApplicationException(IResponseCode.INVALID_DATA,
@@ -418,11 +436,17 @@ public class AssetService {
 		row.setDeviceId(device.getId());
 		row.setName(name);
 
-		row.setPoNo(trimToNull(in.getPo_no()));
-		row.setAssetCode(trimToNull(in.getAsset_code()));
-		row.setAssetSn(trimToNull(in.getAsset_sn()));
+		/*
+		 * A TABLET's PO No., Asset Code, Asset S/N and IP Address are optional: left empty they
+		 * are saved EMPTY (''), not NULL; filled in, they are saved as typed. Other device types
+		 * keep their own rule (required there, so never empty).
+		 */
+		boolean tablet = "tablet".equalsIgnoreCase(String.valueOf(device.getDeviceName()).trim());
+		row.setPoNo(tablet ? trimToEmpty(in.getPo_no()) : trimToNull(in.getPo_no()));
+		row.setAssetCode(tablet ? trimToEmpty(in.getAsset_code()) : trimToNull(in.getAsset_code()));
+		row.setAssetSn(tablet ? trimToEmpty(in.getAsset_sn()) : trimToNull(in.getAsset_sn()));
 		row.setDeviceStatus(trimToNull(in.getDevice_status()));
-		row.setIpAddress(trimToNull(in.getIp_address()));
+		row.setIpAddress(tablet ? trimToEmpty(in.getIp_address()) : trimToNull(in.getIp_address()));
 		row.setPlant(trimToNull(in.getPlant()));
 		row.setDepartment(trimToNull(in.getDepartment()));
 		row.setLocation(trimToNull(in.getLocation()));
@@ -467,6 +491,20 @@ public class AssetService {
 	 * Sets source too: anything that goes through save() arrived from ADD DEVICE, including a
 	 * revived row and a claimed workbook one, so from here on it belongs in LIST DEVICE.
 	 */
+	/**
+	 * ADDED BY — the signed-in employee submitting this device, as ADD DEVICE / BULK UPLOAD send
+	 * them (changed_by_*). Called only when a device is added, never from update().
+	 */
+	private void setAddedBy(AssetMaster row, AssetBO in) {
+		String code = trimToNull(in.getChanged_by_code());
+		String empName = trimToNull(in.getChanged_by_name());
+		row.setAddedByEmpCode(code);
+		// Never empty: a login with no name on record falls back to its code.
+		row.setAddedByEmpName(empName != null ? empName : code);
+		// reg_by is the same person, as a number (employee codes are numeric).
+		row.setRegBy(code != null && code.matches("\\d{1,18}") ? Long.valueOf(code) : null);
+	}
+
 	private void stamp(AssetMaster row) {
 		row.setSource(SOURCE_FORM);
 		row.setCreateDate(LocalDate.now());
@@ -564,6 +602,11 @@ public class AssetService {
 		return trimmed.isEmpty() ? null : trimmed;
 	}
 
+	/** Trimmed, and EMPTY ('') rather than null when nothing was entered — never null. */
+	private String trimToEmpty(String value) {
+		return value == null ? "" : value.trim();
+	}
+
 	/**
 	 * How old the machine is, as the workbook's AGE column means it.
 	 *
@@ -596,6 +639,51 @@ public class AssetService {
 				: age.getYears() + " yr " + age.getMonths() + " mo";
 	}
 
+	/**
+	 * AGE as YEAR.MONTH — the same rule as the ADD DEVICE form (src/lib/warranty.js deviceAge):
+	 * from the warranty start date (or, without one, the day after the last date less the
+	 * warranty's months) to today, in whole months; "5.01" = 5 years 1 month, a start still to
+	 * come is "0.00". Null only when there is no warranty date to work it out from.
+	 */
+	static String ageYearMonth(AssetMaster row, LocalDate today) {
+		LocalDate start = row.getWarrantyStartDate();
+		if (start == null && row.getLastDateOfWarranty() != null && row.getTotalWarrantyYears() != null
+				&& row.getTotalWarrantyYears().signum() > 0) {
+			long months = row.getTotalWarrantyYears().multiply(BigDecimal.valueOf(12))
+					.setScale(0, java.math.RoundingMode.HALF_UP).longValue();
+			start = row.getLastDateOfWarranty().plusDays(1).minusMonths(months);
+		}
+		if (start == null) {
+			return null;
+		}
+		long months = (today.getYear() - start.getYear()) * 12L + (today.getMonthValue() - start.getMonthValue());
+		if (today.getDayOfMonth() < start.getDayOfMonth()) {
+			months -= 1;
+		}
+		if (months < 0) {
+			months = 0;
+		}
+		return (months / 12) + "." + String.format("%02d", months % 12);
+	}
+
+	/**
+	 * Brings every device's stored age up to today. Run at start-up and daily (AgeRefreshJob);
+	 * only rows whose age actually changed are written.
+	 */
+	@Transactional
+	public int refreshAges() {
+		LocalDate today = LocalDate.now();
+		int changed = 0;
+		for (AssetMaster row : assetMasterRepository.findAll()) {
+			String age = ageYearMonth(row, today);
+			if (!Objects.equals(age, row.getAge())) {
+				row.setAge(age);
+				changed++;
+			}
+		}
+		return changed;
+	}
+
 	private AssetBO withDeviceName(AssetMaster row, DeviceMaster device) {
 		AssetBO bo = toBO(row);
 		bo.setDevice_name(device.getDeviceName());
@@ -622,6 +710,8 @@ public class AssetService {
 		bo.setExp_service_code(row.getExpServiceCode());
 		bo.setEmployee_code(row.getEmployeeCode());
 		bo.setEmployee_name(row.getEmployeeName());
+		bo.setAdded_by_emp_code(row.getAddedByEmpCode());
+		bo.setAdded_by_emp_name(row.getAddedByEmpName());
 		bo.setProcessor(row.getProcessor());
 		bo.setRam(row.getRam());
 		bo.setRom(row.getRom());

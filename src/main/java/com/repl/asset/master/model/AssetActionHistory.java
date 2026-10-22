@@ -36,6 +36,17 @@ public class AssetActionHistory {
 	@Column(name = "asset_id", nullable = false)
 	private Long assetId;
 
+	/**
+	 * The machine's PLANT and LOCATION when this entry was written, copied from
+	 * ams_add_device_master — not looked up on read. Moving the device to another plant later
+	 * must not rewrite where it was while this employee held it.
+	 */
+	@Column(name = "plant", length = 150)
+	private String plant;
+
+	@Column(name = "location", length = 150)
+	private String location;
+
 	@Column(name = "assigned_emp_code", length = 50)
 	private String assignedEmpCode;
 
@@ -88,6 +99,22 @@ public class AssetActionHistory {
 
 	public void setAssetId(Long assetId) {
 		this.assetId = assetId;
+	}
+
+	public String getPlant() {
+		return plant;
+	}
+
+	public void setPlant(String plant) {
+		this.plant = plant;
+	}
+
+	public String getLocation() {
+		return location;
+	}
+
+	public void setLocation(String location) {
+		this.location = location;
 	}
 
 	public String getAssignedEmpCode() {

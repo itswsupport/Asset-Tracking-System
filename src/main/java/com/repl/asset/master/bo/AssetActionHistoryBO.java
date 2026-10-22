@@ -23,6 +23,16 @@ public class AssetActionHistoryBO {
 	@JsonProperty("asset_id")
 	private Long asset_id;
 
+	/**
+	 * Where the machine was when this entry was written. Set by the server from the device —
+	 * a value sent by the client is ignored.
+	 */
+	@JsonProperty("plant")
+	private String plant;
+
+	@JsonProperty("location")
+	private String location;
+
 	/** Assigned To Employee — the code. */
 	@JsonProperty("assigned_emp_code")
 	private String assigned_emp_code;
@@ -69,6 +79,22 @@ public class AssetActionHistoryBO {
 
 	public void setAsset_id(Long asset_id) {
 		this.asset_id = asset_id;
+	}
+
+	public String getPlant() {
+		return plant;
+	}
+
+	public void setPlant(String plant) {
+		this.plant = plant;
+	}
+
+	public String getLocation() {
+		return location;
+	}
+
+	public void setLocation(String location) {
+		this.location = location;
 	}
 
 	public String getAssigned_emp_code() {

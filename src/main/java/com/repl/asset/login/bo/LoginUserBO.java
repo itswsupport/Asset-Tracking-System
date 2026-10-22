@@ -35,7 +35,7 @@ public class LoginUserBO {
 	@JsonProperty("displayName")
 	private String displayName;
 
-	/** ADMIN / USER / VIEWER, from ams_login_access — never from the master. */
+	/** USER / ADMIN / ADMIN,USER / VIEWER, from ams_login_access — never from the master. */
 	@JsonProperty("role")
 	private String role;
 

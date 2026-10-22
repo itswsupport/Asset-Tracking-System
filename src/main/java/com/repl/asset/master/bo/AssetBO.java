@@ -110,6 +110,13 @@ public class AssetBO {
 	@JsonProperty("employee_name")
 	private String employee_name;
 
+	/** Who first added the device — set by the server, read-only to the client. */
+	@JsonProperty("added_by_emp_code")
+	private String added_by_emp_code;
+
+	@JsonProperty("added_by_emp_name")
+	private String added_by_emp_name;
+
 	/** Excel N. */
 	@JsonProperty("processor")
 	private String processor;
@@ -389,6 +396,22 @@ public class AssetBO {
 
 	public void setEmployee_name(String employee_name) {
 		this.employee_name = employee_name;
+	}
+
+	public String getAdded_by_emp_code() {
+		return added_by_emp_code;
+	}
+
+	public void setAdded_by_emp_code(String added_by_emp_code) {
+		this.added_by_emp_code = added_by_emp_code;
+	}
+
+	public String getAdded_by_emp_name() {
+		return added_by_emp_name;
+	}
+
+	public void setAdded_by_emp_name(String added_by_emp_name) {
+		this.added_by_emp_name = added_by_emp_name;
 	}
 
 	public String getExternal_processor() {
