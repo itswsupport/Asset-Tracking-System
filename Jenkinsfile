@@ -80,6 +80,14 @@ pipeline {
     // build stops here; application.properties' development default is never used.
     JWT_SECRET  = credentials('ams-jwt-secret')
 
+    // >> CURRENTLY OFF for the test deployment. <<
+    // 'false' skips the BCrypt check against emp_details.emp_pass: anyone who knows a
+    // registered employee code can sign in as that employee, with any password or none.
+    // The employee must still be active in emp_details AND hold an active ams_login_access
+    // row, and the role still comes from there. LoginServiceImpl logs a WARN on every
+    // sign-in while this is off. Set back to 'true' once real passwords are in use.
+    LOGIN_PASSWORD_VERIFY = 'false'
+
     // Trivy configuration. '1' fails the build on findings; '0' reports and carries on,
     // which is what the rest of the fleet does.
     TRIVY_SEVERITY  = 'CRITICAL,HIGH'
@@ -237,10 +245,9 @@ pipeline {
         // same reason as TMS: this MySQL offers only TLS versions a modern JDK has disabled,
         // so the handshake would fail and read like the server is unreachable.
         //
-        // LOGIN_PASSWORD_VERIFY=true — NOT optional. application.properties has
-        // login.password.verify=false, a local-development switch that lets ANYONE sign in
-        // with any password (only the emp_code is checked). This env var overrides it, so
-        // the deployed backend always checks passwords whatever the file in git says.
+        // LOGIN_PASSWORD_VERIFY comes from the environment block above (currently 'false':
+        // password check skipped). It overrides login.password.verify in
+        // application.properties, so the deployed setting is decided here, not by that file.
         sh """
           set +x
           umask 077
@@ -248,7 +255,7 @@ pipeline {
 SPRING_DATASOURCE_URL=\${DB_URL}\${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048
 SPRING_DATASOURCE_USERNAME=\${DB_USERNAME}
 SPRING_DATASOURCE_PASSWORD=\${DB_PASSWORD}
-LOGIN_PASSWORD_VERIFY=true
+LOGIN_PASSWORD_VERIFY=\${LOGIN_PASSWORD_VERIFY}
 JWT_SECRET=\${JWT_SECRET}
 EOF
 

@@ -35,9 +35,9 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-root}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
 
-      # login.password.verify=false in application.properties lets anyone sign in with any
-      # password. Forced on here, as in the Jenkins deploy.
-      LOGIN_PASSWORD_VERIFY: "true"
+      # false = skip the password check: anyone who knows a registered employee code can sign
+      # in as them. Defaults to true here; set LOGIN_PASSWORD_VERIFY=false in .env to skip it.
+      LOGIN_PASSWORD_VERIFY: ${LOGIN_PASSWORD_VERIFY:-true}
 
       # Signs the sign-in tokens (JWT). Required — compose stops if it is unset, so the
       # development default in application.properties can never be used here. 32+ characters.

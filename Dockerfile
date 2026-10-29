@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # AMS backend (Asset-Tracking-System) — Spring Boot 4.1 on Java 21, packaged as an
 # executable jar and run with `java -jar`. Same shape as the TMS backend image
 # (Maven builder -> slim JRE runner), with the versions this project actually uses:
@@ -15,17 +13,20 @@
 FROM maven:3.9-eclipse-temurin-21 AS builder
 WORKDIR /build
 
+# No `RUN --mount=type=cache` here: the Jenkins server's Docker has no BuildKit (buildx),
+# and the legacy builder rejects --mount. Instead the dependencies get their own layer:
+# pom.xml is copied alone first, so as long as it is unchanged Docker reuses the
+# downloaded ~/.m2 from cache and a code-only change does not re-download anything.
 COPY pom.xml ./
+RUN mvn -B dependency:go-offline
+
 COPY src ./src
 
 # Tests are skipped deliberately: the only test is AssetTrackingSystemApplicationTests, a
 # bare @SpringBootTest contextLoads() that starts the whole Spring context and so opens the
 # datasource at jdbc:mysql://192.168.100.30:3309/db_asset. A build machine cannot be assumed
 # to reach it, and a build that fails for lack of a database says nothing about the code.
-#
-# The cache mount keeps ~/.m2 between builds, so only changed dependencies are fetched.
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn -B -DskipTests package
+RUN mvn -B -DskipTests package
 
 # artifactId=Asset-Tracking-System, version=0.0.1-SNAPSHOT
 #   -> target/Asset-Tracking-System-0.0.1-SNAPSHOT.jar (the executable one, ~60MB).
