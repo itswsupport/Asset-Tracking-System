@@ -44,8 +44,6 @@ import com.repl.asset.message.IResponseCode;
 @Service
 public class DeviceStatusService {
 
-	/** Added through ADD DEVICE — the rows LIST DEVICE shows. Matches AssetService. */
-	private static final String SOURCE_FORM = "FORM";
 
 	public static final String ASSIGNED = "ASSIGNED";
 	public static final String OPEN = "OPEN";
@@ -91,7 +89,6 @@ public class DeviceStatusService {
 
 		List<AssetMaster> assets = assetMasterRepository.findByDeviceId(deviceId).stream()
 				.filter(a -> a.getStatus() != Constants.STATUS_DELETED)
-				.filter(a -> SOURCE_FORM.equalsIgnoreCase(a.getSource()))
 				.sorted(Comparator.comparing(AssetMaster::getId).reversed())
 				.toList();
 
@@ -237,6 +234,8 @@ public class DeviceStatusService {
 		bo.setStart_date(row.getStartDate());
 		bo.setEnd_date(row.getEndDate());
 		bo.setAction_status(row.getActionStatus());
+		bo.setAction_by_emp_code(row.getActionByEmpCode());
+		bo.setAction_by_emp_name(row.getActionByEmpName());
 		bo.setCreate_date(row.getCreateDate());
 		bo.setCreate_time(row.getCreateTime());
 		bo.setStatus(row.getStatus());

@@ -51,8 +51,6 @@ public class ReferenceNumberService {
 
 	private static final Logger logger = LoggerFactory.getLogger(ReferenceNumberService.class);
 
-	/** Added through ADD DEVICE. Matches AssetService. */
-	private static final String SOURCE_FORM = "FORM";
 
 	@Autowired
 	private DeviceMasterRepository deviceMasterRepository;
@@ -190,7 +188,6 @@ public class ReferenceNumberService {
 
 		List<AssetMaster> machines = assetMasterRepository.findAll().stream()
 				.filter(a -> a.getStatus() != Constants.STATUS_DELETED)
-				.filter(a -> SOURCE_FORM.equalsIgnoreCase(a.getSource()))
 				.filter(a -> notBlank(a.getName()))
 				.filter(a -> !notBlank(a.getReferenceNo()))
 				.sorted(Comparator.comparing(AssetMaster::getId))
@@ -272,8 +269,6 @@ public class ReferenceNumberService {
 		String wanted = name.trim();
 		return assetMasterRepository.findByDeviceId(deviceId).stream()
 				.filter(a -> a.getStatus() != Constants.STATUS_DELETED)
-				// Only ADD DEVICE entries — the workbook's imported rows are bare names, unregistered.
-				.filter(a -> SOURCE_FORM.equalsIgnoreCase(a.getSource()))
 				.filter(a -> a.getName() != null && wanted.equalsIgnoreCase(a.getName().trim()))
 				.findFirst()
 				.orElse(null);

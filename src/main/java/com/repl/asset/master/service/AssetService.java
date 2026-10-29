@@ -69,30 +69,19 @@ public class AssetService {
 	@Autowired
 	private AssetChangeLogRepository changeLogRepository;
 
-	/** Added through ADD DEVICE. */
-	private static final String SOURCE_FORM = "FORM";
-
 	/**
-	 * The machines of one device type, active AND inactive, newest first.
-	 *
-	 * ONLY THE ONES ADDED THROUGH ADD DEVICE by default, which is what LIST DEVICE wants. The
-	 * 656 rows carried over from the workbook are names and almost nothing else, so listing
-	 * them alongside real entries buries what was actually filled in.
-	 *
-	 * includeImported brings the workbook rows back, and is what ADD DEVICE asks for — its
-	 * Model and Device Name dropdowns are built from the whole catalogue, and its duplicate
-	 * check has to see every name, not just the ones added here.
+	 * The machines of one device type, active AND inactive, newest first — every device added
+	 * through ADD DEVICE or BULK UPLOAD, deleted ones left out.
 	 *
 	 * Newest first rather than alphabetically, unlike the masters: this is a register being
 	 * added to, so the row just saved belongs at the top where it can be seen.
 	 */
 	@Transactional(readOnly = true)
-	public List<AssetBO> list(Long deviceId, boolean includeImported) throws ApplicationException {
+	public List<AssetBO> list(Long deviceId) throws ApplicationException {
 		DeviceMaster device = requireDevice(deviceId);
 
 		return assetMasterRepository.findByDeviceId(device.getId()).stream()
 				.filter(row -> row.getStatus() != Constants.STATUS_DELETED)
-				.filter(row -> includeImported || SOURCE_FORM.equalsIgnoreCase(row.getSource()))
 				.sorted(Comparator.comparing(AssetMaster::getId).reversed())
 				.map(row -> {
 					AssetBO bo = toBO(row);
@@ -118,26 +107,22 @@ public class AssetService {
 
 		if (existing != null) {
 			/*
-			 * Three ways a name can already be taken, and only one of them is an error.
+			 * Two ways a name can already be taken, and only one of them is an error.
 			 *
 			 * DELETED — uk_device_asset is UNIQUE on (device_id, name), so a soft-deleted row
 			 * still occupies that pair and a second insert is impossible. Re-adding revives
 			 * it; refusing would be wrong, since the screen shows nothing there.
 			 *
-			 * IMPORTED — the row came from the workbook and is a bare name. Adding it here is
-			 * how it gets filled in for the first time, so the row is CLAIMED: the form's
-			 * values go on, it becomes a FORM row, and it appears in LIST DEVICE. Refusing
-			 * would strand it — it is not in the list, so there would be nowhere to edit it
-			 * from either.
-			 *
 			 * ALREADY ADDED — a real entry someone made. This is the error, and ADD DEVICE
 			 * does not quietly update it, because that would change a record the user never
 			 * chose to open.
+			 *
+			 * (There used to be a third, IMPORTED: a bare name from the old asset workbook,
+			 * claimed by adding it here. Those rows no longer exist — see AssetMaster.)
 			 */
 			boolean deleted = existing.getStatus() == Constants.STATUS_DELETED;
-			boolean imported = !SOURCE_FORM.equalsIgnoreCase(existing.getSource());
 
-			if (!deleted && !imported) {
+			if (!deleted) {
 				// Says where it is: the Reference No it already has, and the lists it is in.
 				String ref = existing.getReferenceNo();
 				throw new ApplicationException(IResponseCode.EXISTING_ENTITY,
@@ -506,7 +491,6 @@ public class AssetService {
 	}
 
 	private void stamp(AssetMaster row) {
-		row.setSource(SOURCE_FORM);
 		row.setCreateDate(LocalDate.now());
 		row.setCreateTime(LocalTime.now().withNano(0));
 		row.setRegTime(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")));
@@ -741,8 +725,6 @@ public class AssetService {
 		bo.setCreate_date(row.getCreateDate());
 		bo.setCreate_time(row.getCreateTime());
 		bo.setStatus(row.getStatus());
-		// Out only, so ADD DEVICE can tell a name already added from one merely catalogued.
-		bo.setSource(row.getSource());
 		bo.setAdded_via(row.getAddedVia());
 
 		// The newest action, summarised. Out only — AssetActionHistoryService owns these.

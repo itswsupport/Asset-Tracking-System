@@ -265,19 +265,12 @@ public class AssetMaster {
 	@Column(name = "reg_time")
 	private String regTime;
 
-	/**
-	 * How this row arrived: IMPORT or FORM.
-	 *
-	 * The workbook rows and the ones people add are both machines, but they are not the same
-	 * thing to look at. An imported row is a name and little else — 656 of them carry no model,
-	 * no asset code, no department — so listing them beside real entries buries the handful that
-	 * were actually filled in under hundreds of empty ones.
-	 *
-	 * LIST DEVICE therefore shows FORM rows only. The imported ones stay, and are what the ADD
-	 * DEVICE dropdowns are built from, so they remain the catalogue of machines the company owns.
+	/*
+	 * No `source` column any more. It told rows imported from the old asset workbook (IMPORT,
+	 * a bare name) from real entries (FORM). The imported rows are gone — the catalogue of names
+	 * lives in ams_device_name_master — nothing wrote IMPORT any longer, and every row read
+	 * FORM, so it said nothing. HOW a device was added is added_via below.
 	 */
-	@Column(name = "source", nullable = false, length = 20)
-	private String source;
 
 	/**
 	 * HOW THE DEVICE WAS ADDED: "FORM" through ADD DEVICE, "BULK" through BULK UPLOAD. Set
@@ -703,13 +696,5 @@ public class AssetMaster {
 
 	public void setRegTime(String regTime) {
 		this.regTime = regTime;
-	}
-
-	public String getSource() {
-		return source;
-	}
-
-	public void setSource(String source) {
-		this.source = source;
 	}
 }

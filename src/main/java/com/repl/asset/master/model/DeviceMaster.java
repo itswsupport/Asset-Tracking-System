@@ -14,8 +14,8 @@ import jakarta.persistence.Table;
 /**
  * One KIND of device the hardware team works with — Laptop, Desktop, Printer, Tablet.
  *
- * NOT an individual machine. "Laptop", not "EDC712": the machines themselves live in the
- * per-type masters loaded from the asset workbook (ams_laptop_master and friends).
+ * NOT an individual machine. "Laptop", not "EDC712": the machines themselves live in
+ * ams_add_device_master (AssetMaster), each with the id of its kind here.
  *
  * Deliberately just a name and a status. It was briefly a much wider record (make, bits,
  * warranty dates) and was cut back: the register only has to answer "which kinds of device

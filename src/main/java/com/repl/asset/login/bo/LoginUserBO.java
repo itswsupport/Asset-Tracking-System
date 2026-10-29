@@ -23,6 +23,10 @@ public class LoginUserBO {
 	@JsonProperty("emp_code")
 	private Long emp_code;
 
+	/** The sign-in token (JWT) — sent back as "Authorization: Bearer <token>" on every request. */
+	@JsonProperty("token")
+	private String token;
+
 	@JsonProperty("userFname")
 	private String userFname;
 
@@ -121,6 +125,14 @@ public class LoginUserBO {
 
 	public void setEmp_code(Long emp_code) {
 		this.emp_code = emp_code;
+	}
+
+	public String getToken() {
+		return token;
+	}
+
+	public void setToken(String token) {
+		this.token = token;
 	}
 
 	public String getUserFname() {

@@ -1,0 +1,39 @@
+# Build output. The Dockerfile builds the jar itself in a Maven stage from pom.xml + src/,
+# so nothing under target/ is needed in the build context — excluding it keeps the ~60MB
+# local jar out of every `docker build`.
+target/
+bin/
+
+# Maven wrapper — the builder image brings its own Maven.
+.mvn/
+mvnw
+mvnw.cmd
+
+# VCS + IDE
+.git
+.gitignore
+.gitattributes
+.metadata
+.settings
+.classpath
+.project
+.springBeans
+.sts4-cache
+.apt_generated
+.factorypath
+.idea
+*.iml
+.vscode
+
+# Pipeline files and reports
+Jenkinsfile
+docker-compose.yml
+.env
+.env.deploy
+dependency-check-report.*
+trivy-*
+docker-logs.txt
+
+# Docs and misc
+*.md
+HELP.md

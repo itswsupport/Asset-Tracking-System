@@ -44,18 +44,15 @@ public class AssetController extends BaseController {
 	@Autowired
 	private AssetService service;
 
-	/**
-	 * @param includeImported true also returns the machines carried over from the asset
-	 *                        workbook. LIST DEVICE leaves it off, so it shows only what was
-	 *                        added through ADD DEVICE; ADD DEVICE passes it, because its
-	 *                        dropdowns and its duplicate check need the whole catalogue.
+	/*
+	 * No include_imported parameter any more: there are no imported rows to include (see the
+	 * note where AssetMaster's `source` column used to be). An older UI that still sends it is
+	 * unaffected — Spring ignores query parameters a handler does not declare.
 	 */
 	@GetMapping(value = { "/asset/list", "/asset/list/" })
-	public ResponseEntity<BaseResponseBO> list(@RequestParam("device_id") Long deviceId,
-			@RequestParam(name = "include_imported", required = false,
-					defaultValue = "false") boolean includeImported) {
+	public ResponseEntity<BaseResponseBO> list(@RequestParam("device_id") Long deviceId) {
 		try {
-			return getResponseModel(service.list(deviceId, includeImported), IResponseCode.SUCCESS,
+			return getResponseModel(service.list(deviceId), IResponseCode.SUCCESS,
 					IResponseMessage.SUCCESS, null);
 		} catch (ApplicationException e) {
 			return getResponseModel(null, e.getCode(), e.getMessage(), null);

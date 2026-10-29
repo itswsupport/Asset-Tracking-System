@@ -614,15 +614,6 @@ public class AssetBO {
 		this.status = status;
 	}
 
-	/**
-	 * How the row arrived — IMPORT or FORM. Set by the server, ignored on the way in.
-	 *
-	 * ADD DEVICE uses it to tell a name that is already a real entry from one that is only
-	 * catalogued from the workbook: the first cannot be added again, the second can.
-	 */
-	@JsonProperty("source")
-	private String source;
-
 	/** "FORM" (ADD DEVICE) or "BULK" (BULK UPLOAD) — how the device was first added. */
 	@JsonProperty("added_via")
 	private String added_via;
@@ -649,14 +640,6 @@ public class AssetBO {
 
 	public void setAssign_start_date(LocalDate assign_start_date) {
 		this.assign_start_date = assign_start_date;
-	}
-
-	public String getSource() {
-		return source;
-	}
-
-	public void setSource(String source) {
-		this.source = source;
 	}
 
 	/**

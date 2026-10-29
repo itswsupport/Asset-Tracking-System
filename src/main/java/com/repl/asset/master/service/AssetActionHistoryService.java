@@ -47,6 +47,8 @@ public class AssetActionHistoryService {
 	 */
 	public static final List<String> ACTION_STATUSES = List.of(
 			"Assigned",
+			// Released back to stock with nobody new: the device is Open again (AllocationService).
+			"Open",
 			"User Left",
 			"Asset Transferred",
 			"Laptop Replaced",
@@ -102,6 +104,22 @@ public class AssetActionHistoryService {
 		row.setCreateDate(LocalDate.now());
 		row.setCreateTime(LocalTime.now().withNano(0));
 		row.setRegTime(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")));
+
+		// Who assigned it: set here only, so a later correction never rewrites it.
+		String byCode = byCode(in);
+		String byName = byName(in);
+		if (byCode == null) {
+			// Nobody signed in was sent: whoever added the device, so the column is never empty.
+			AssetMaster asset = assetMasterRepository.findById(assetId).orElse(null);
+			if (asset != null) {
+				byCode = trimToNull(asset.getAddedByEmpCode());
+				byName = trimToNull(asset.getAddedByEmpName());
+			}
+		}
+		row.setActionByEmpCode(byCode);
+		row.setActionByEmpName(byName);
+		// reg_by is the same person, as a number (employee codes are numeric), as on the device.
+		row.setRegBy(byCode != null && byCode.matches("\\d{1,18}") ? Long.valueOf(byCode) : null);
 
 		closeOpenHolders(assetId, row);
 
@@ -242,8 +260,16 @@ public class AssetActionHistoryService {
 						newest.getCreateTime() == null ? LocalTime.MIDNIGHT : newest.getCreateTime()));
 
 		if (trimToNull(holderCode) != null || trimToNull(holderName) != null) {
-			asset.setEmployeeCode(trimToNull(holderCode));
-			asset.setEmployeeName(trimToNull(holderName));
+			if (newest.getEndDate() != null) {
+				// The newest holder has been RELEASED (e.g. back to stock as "Open") and nobody
+				// new took it: the machine has no holder now. Left as it was, the list would
+				// keep showing the previous employee against a device that is Open.
+				asset.setEmployeeCode(null);
+				asset.setEmployeeName(null);
+			} else {
+				asset.setEmployeeCode(trimToNull(holderCode));
+				asset.setEmployeeName(trimToNull(holderName));
+			}
 		}
 
 		assetMasterRepository.save(asset);
@@ -312,6 +338,17 @@ public class AssetActionHistoryService {
 		return in.getAsset_id();
 	}
 
+	/** The signed-in employee saving, as sent (changed_by_*). */
+	private String byCode(AssetActionHistoryBO in) {
+		return trimToNull(in.getChanged_by_code());
+	}
+
+	/** Their name — never empty when there is a code: a login with no name falls back to it. */
+	private String byName(AssetActionHistoryBO in) {
+		String name = trimToNull(in.getChanged_by_name());
+		return name != null ? name : byCode(in);
+	}
+
 	private String trimToNull(String value) {
 		if (value == null) {
 			return null;
@@ -331,6 +368,8 @@ public class AssetActionHistoryService {
 		bo.setStart_date(row.getStartDate());
 		bo.setEnd_date(row.getEndDate());
 		bo.setAction_status(row.getActionStatus());
+		bo.setAction_by_emp_code(row.getActionByEmpCode());
+		bo.setAction_by_emp_name(row.getActionByEmpName());
 		bo.setCreate_date(row.getCreateDate());
 		bo.setCreate_time(row.getCreateTime());
 		bo.setStatus(row.getStatus());

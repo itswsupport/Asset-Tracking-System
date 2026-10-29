@@ -2,6 +2,8 @@ package com.repl.asset.common;
 
 import java.lang.reflect.Method;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -41,8 +43,16 @@ public class RegByListener {
 		}
 	}
 
-	/** The X-Emp-Code of the current request as a number, or null when there is none. */
+	/**
+	 * The signed-in employee's code: from their sign-in token (JwtRequestFilter) — which cannot
+	 * be made up — and only failing that from the X-Emp-Code header. Null when there is neither.
+	 */
 	public static Long currentEmpCode() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth != null && auth.isAuthenticated() && auth.getName() != null
+				&& auth.getName().matches("[0-9]{1,18}")) {
+			return Long.valueOf(auth.getName());
+		}
 		RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
 		if (!(attrs instanceof ServletRequestAttributes servlet)) {
 			return null;

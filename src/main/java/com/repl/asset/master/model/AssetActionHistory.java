@@ -68,6 +68,15 @@ public class AssetActionHistory {
 	@Column(name = "action_status", length = 50)
 	private String actionStatus;
 
+	/**
+	 * WHO MADE THIS ENTRY — the signed-in employee who assigned the device (ADD DEVICE or BULK
+	 * UPLOAD). Set once, when the row is written; a later correction does not change it.
+	 */
+	@Column(name = "action_by_emp_code", length = 50)
+	private String actionByEmpCode;
+
+	@Column(name = "action_by_emp_name", length = 150)
+	private String actionByEmpName;
 
 	@Column(name = "create_date")
 	private LocalDate createDate;
@@ -155,6 +164,22 @@ public class AssetActionHistory {
 
 	public void setActionStatus(String actionStatus) {
 		this.actionStatus = actionStatus;
+	}
+
+	public String getActionByEmpCode() {
+		return actionByEmpCode;
+	}
+
+	public void setActionByEmpCode(String actionByEmpCode) {
+		this.actionByEmpCode = actionByEmpCode;
+	}
+
+	public String getActionByEmpName() {
+		return actionByEmpName;
+	}
+
+	public void setActionByEmpName(String actionByEmpName) {
+		this.actionByEmpName = actionByEmpName;
 	}
 
 	public LocalDate getCreateDate() {

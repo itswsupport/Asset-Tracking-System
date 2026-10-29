@@ -115,6 +115,9 @@ public class BulkUploadController extends BaseController {
 					entry.setStart_date(row.getAssign_start_date());
 					entry.setEnd_date(null);
 					entry.setAction_status("Assigned");
+					// Assigned by whoever uploaded the sheet — the same person recorded as ADDED BY.
+					entry.setChanged_by_code(row.getChanged_by_code());
+					entry.setChanged_by_name(row.getChanged_by_name());
 					historyService.save(entry);
 					note = "Assigned to " + code;
 				} catch (Exception e) {

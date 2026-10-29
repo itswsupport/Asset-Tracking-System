@@ -33,42 +33,33 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
-		<!-- Bean Validation for @Valid on form-backing objects -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-validation</artifactId>
-		</dependency>
-
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
 
+		<!--
+			JWT sign-in tokens — the same library and version as the TMS backend (JJWT 0.10.7).
+			api + impl only: jjwt-jackson is left out because it is built on Jackson 2 and this
+			project runs Jackson 3. JwtTokenUtil hands JJWT its own Jackson 3 (de)serializer.
+		-->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-thymeleaf</artifactId>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>0.10.7</version>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>0.10.7</version>
+			<scope>runtime</scope>
 		</dependency>
 
 		<!--
-		  REMOVED: org.thymeleaf.extras:thymeleaf-extras-springsecurity6
-
-		  It is compiled against Spring Security 6, while this project resolves Spring
-		  Security 7.1.1. It still builds; the failure appears only as a NoSuchMethodError
-		  the first time a template evaluates a sec:* attribute.
-
-		  Switching to thymeleaf-extras-springsecurity7 is not possible - that artifact has
-		  never been published (Maven Central returns 404). The 6 line ends at 3.1.5.RELEASE.
-
-		  Nothing here needs it: there is no src/main/resources/templates directory, since
-		  the UI is the separate Next.js app. Thymeleaf itself still works via the starter
-		  above - only the sec:* attributes are unavailable. If they are ever needed, pass
-		  the values in from the controller instead.
+		  No Thymeleaf, Mail or Bean Validation starters: the UI is the separate Next.js app (no
+		  server-side templates), nothing sends mail, and no class uses @Valid / jakarta.validation.
+		  Add the starter back when one of those is actually needed.
 		-->
-
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-mail</artifactId>
-		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -102,16 +93,6 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-thymeleaf-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-mail-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

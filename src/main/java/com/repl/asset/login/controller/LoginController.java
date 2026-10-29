@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.repl.asset.basecontroller.BaseController;
 import com.repl.asset.bo.BaseResponseBO;
+import com.repl.asset.config.JwtTokenUtil;
 import com.repl.asset.constant.Constants;
 import com.repl.asset.exception.ApplicationException;
 import com.repl.asset.login.bo.LoginUserBO;
@@ -26,6 +27,9 @@ public class LoginController extends BaseController {
 
 	@Autowired
 	private ILoginService loginService;
+
+	@Autowired
+	private JwtTokenUtil jwtTokenUtil;
 
 	/**
 	 * POST /login?emp_code=...&emp_pass=...
@@ -43,6 +47,8 @@ public class LoginController extends BaseController {
 			@RequestParam(value = "emp_pass", required = false) String empPass) {
 		try {
 			LoginUserBO user = loginService.login(empCode, empPass);
+			// Issued only once sign-in has fully succeeded (password and AMS access both checked).
+			user.setToken(jwtTokenUtil.generateToken(user.getEmp_code(), user.getRole()));
 			return getResponseModel(user, IResponseCode.SUCCESS, IResponseMessage.SUCCESS, null);
 		} catch (ApplicationException e) {
 			// Expected sign-in failures: unknown code, inactive employee, bad password, no
@@ -57,11 +63,9 @@ public class LoginController extends BaseController {
 	/**
 	 * POST /logout?emp_code=...
 	 *
-	 * Honest about what it is: AMS issues no token and keeps no server-side session, so
-	 * there is nothing on this side to invalidate — the session lives entirely in the
-	 * browser's localStorage and the frontend clears it. This endpoint exists so the sign-out
-	 * is recorded in the application log, and so a token store can be added later without
-	 * the frontend having to change.
+	 * Honest about what it is: the sign-in token is stateless (nothing is kept server-side),
+	 * so there is nothing here to invalidate — the browser forgets its token and the session
+	 * is over. This endpoint exists so the sign-out is recorded in the application log.
 	 *
 	 * It always succeeds. Logging out must never fail and strand someone in the app.
 	 */

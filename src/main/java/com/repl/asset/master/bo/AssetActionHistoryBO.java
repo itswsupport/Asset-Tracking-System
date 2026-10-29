@@ -54,6 +54,24 @@ public class AssetActionHistoryBO {
 	/** "User Left", "Asset Transferred", … — the text itself, see AssetActionHistory. */
 	@JsonProperty("action_status")
 	private String action_status;
+
+	/**
+	 * IN: the signed-in employee saving this entry, as ADD DEVICE and BULK UPLOAD send it for a
+	 * device (changed_by_*). Recorded as action_by on a new entry.
+	 */
+	@JsonProperty("changed_by_code")
+	private String changed_by_code;
+
+	@JsonProperty("changed_by_name")
+	private String changed_by_name;
+
+	/** OUT: who assigned the device (made the entry). Set by the server. */
+	@JsonProperty("action_by_emp_code")
+	private String action_by_emp_code;
+
+	@JsonProperty("action_by_emp_name")
+	private String action_by_emp_name;
+
 	@JsonProperty("create_date")
 	@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
 	private LocalDate create_date;
@@ -135,6 +153,38 @@ public class AssetActionHistoryBO {
 
 	public void setAction_status(String action_status) {
 		this.action_status = action_status;
+	}
+
+	public String getChanged_by_code() {
+		return changed_by_code;
+	}
+
+	public void setChanged_by_code(String changed_by_code) {
+		this.changed_by_code = changed_by_code;
+	}
+
+	public String getChanged_by_name() {
+		return changed_by_name;
+	}
+
+	public void setChanged_by_name(String changed_by_name) {
+		this.changed_by_name = changed_by_name;
+	}
+
+	public String getAction_by_emp_code() {
+		return action_by_emp_code;
+	}
+
+	public void setAction_by_emp_code(String action_by_emp_code) {
+		this.action_by_emp_code = action_by_emp_code;
+	}
+
+	public String getAction_by_emp_name() {
+		return action_by_emp_name;
+	}
+
+	public void setAction_by_emp_name(String action_by_emp_name) {
+		this.action_by_emp_name = action_by_emp_name;
 	}
 
 	public LocalDate getCreate_date() {

@@ -1,0 +1,71 @@
+# AMS backend (Asset-Tracking-System, Spring Boot).
+#
+# The MySQL database is external (application.properties points at 192.168.100.30:3309),
+# so there is no `db` service here; the container just needs to be able to route to it.
+#
+# Usage — the Dockerfile builds the jar itself in a Maven stage, so no local package step:
+#   docker compose up -d --build
+#   docker compose logs -f
+#   docker compose down
+#
+# Put real credentials in a .env file next to this one (never commit it):
+#   DB_URL=jdbc:mysql://<host>:3309/db_asset?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+#   DB_USERNAME=...
+#   DB_PASSWORD=...
+#   JWT_SECRET=<32+ random characters — signs the sign-in tokens>
+
+services:
+  ams-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ams-backend:latest
+    # The name the AMS UI proxies to (http://ams-backend:8080).
+    container_name: ams-backend
+    restart: unless-stopped
+
+    ports:
+      # host:container — 9098 on the host (8080 is usually Jenkins), 8080 inside.
+      - "9098:8080"
+
+    environment:
+      # Spring relaxed binding: SPRING_DATASOURCE_URL overrides spring.datasource.url, etc.
+      # No password default on purpose — compose stops with this message if it is unset.
+      SPRING_DATASOURCE_URL: ${DB_URL:-jdbc:mysql://192.168.100.30:3309/db_asset?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048}
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+
+      # login.password.verify=false in application.properties lets anyone sign in with any
+      # password. Forced on here, as in the Jenkins deploy.
+      LOGIN_PASSWORD_VERIFY: "true"
+
+      # Signs the sign-in tokens (JWT). Required — compose stops if it is unset, so the
+      # development default in application.properties can never be used here. 32+ characters.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (32+ random characters)}
+
+      TZ: Asia/Kolkata
+
+    # The image sizes the heap as 75% of this limit.
+    mem_limit: 1536m
+
+    healthcheck:
+      # Same check as the image's HEALTHCHECK (a compose healthcheck replaces it rather than
+      # inheriting it): a sign-in as employee 0, which does not exist. /login is open and the
+      # lookup is a real query — status_code 500 "User Not Found" = the database answered;
+      # 501 = it did not. Every other API needs a sign-in token.
+      test: ["CMD-SHELL", "curl -fsS -X POST 'http://127.0.0.1:8080/login/?emp_code=0&emp_pass=healthcheck' | grep -Eq '\"status_code\" ?: ?500' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+
+    networks:
+      - ams
+
+networks:
+  # A compose-owned network, as in the TMS backend's compose file — deliberately NOT named
+  # ams-net. That one is created by the Jenkins deploys, and Compose v2 refuses to adopt a
+  # network it did not create ("found but has incorrect label"), so naming it here would
+  # break `docker compose up` on any host Jenkins has deployed to.
+  ams:
+    driver: bridge
