@@ -25,8 +25,8 @@ services:
     restart: unless-stopped
 
     ports:
-      # host:container — 9098 on the host (8080 is usually Jenkins), 8080 inside.
-      - "9098:8080"
+      # host:container — 9095 on the host (8080 is Jenkins, 9096-9099 other backends), 8080 inside.
+      - "9095:8080"
 
     environment:
       # Spring relaxed binding: SPRING_DATASOURCE_URL overrides spring.datasource.url, etc.

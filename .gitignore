@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Docker ###
+.env
+.env.deploy
+
+### Eclipse output ###
+bin/

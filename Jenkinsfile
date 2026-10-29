@@ -17,7 +17,10 @@ pipeline {
   agent any
 
   triggers {
-    githubPush()
+    // GitHub can't reach 192.168.100.30 (private LAN), so a push webhook never arrives.
+    // Poll instead, as the Sustainability backend does; switch to githubPush() if Jenkins
+    // is ever exposed.
+    pollSCM('H/5 * * * *')
   }
 
   options {
@@ -46,9 +49,10 @@ pipeline {
 
     // Port on the Docker HOST, used only by this pipeline's smoke test and by a human with
     // curl — the UI does not use it. NOT 8080: Jenkins itself normally listens on 8080 on the
-    // host. 9098 is the port the AMS UI's .env.example already names for this backend. The
-    // Deploy preflight fails the build if anything else holds it.
-    HOST_PORT  = '9098'
+    // host. NOT 9098 either: that is clms-backend (and payRoll). Taken on this server:
+    // 9096 Sustainability, 9097 PRPO, 9098 clms-backend, 9099 attendance-sync-service.
+    // The Deploy preflight fails the build if anything else holds it.
+    HOST_PORT  = '9095'
 
     // No server.servlet.context-path: the backend serves from the root, which is why the
     // UI's rewrite strips /api (/api/device/list/ -> /device/list/).
@@ -344,10 +348,8 @@ EOF
   post {
     success {
       echo "Deployed ${IMAGE}:${TAG} (${env.GIT_SHA}) on port ${HOST_PORT}"
-      mail to: "${RECIPIENTS}",
-           subject: "Jenkins Build SUCCESS: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
-           body: """
-The build was successful.
+      script {
+        notify('SUCCESS', """The build was successful.
 
 Job: ${env.JOB_NAME}
 Build: ${env.BUILD_URL}
@@ -362,13 +364,12 @@ Security Scans:
 - Trivy Vulnerability Scan: Completed
 
 View Trivy Report: ${env.BUILD_URL}Trivy_Vulnerability_Report/
-"""
+""")
+      }
     }
     failure {
-      mail to: "${RECIPIENTS}",
-           subject: "Jenkins Build FAILED: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
-           body: """
-The build has failed.
+      script {
+        notify('FAILED', """The build has failed.
 
 Job: ${env.JOB_NAME}
 Build: ${env.BUILD_URL}
@@ -379,32 +380,54 @@ Security Scans may have identified issues. Check:
 - OWASP Report: ${env.BUILD_URL}artifact/dependency-check-report.html
 
 Console output: ${env.BUILD_URL}console
-"""
+""")
+      }
     }
     always {
-      // The env-file holds the database password. Deploy removes it, but a build that fails
-      // or is aborted in between would leave it in the workspace.
-      sh "rm -f .env.deploy || true"
+      script {
+        // A failure before any stage ran (e.g. a missing credential in environment) leaves
+        // no workspace, and sh would then dump a MissingContextVariableException trace that
+        // buries the real error.
+        if (!env.WORKSPACE) {
+          echo 'Cleanup skipped: the build failed before a workspace existed. See the first ERROR above.'
+          return
+        }
 
-      // 2>&1 because Spring writes its startup log to stderr.
-      sh 'docker logs ${CONTAINER} > docker-logs.txt 2>&1 || true'
-      archiveArtifacts artifacts: 'docker-logs.txt', allowEmptyArchive: true
+        // The env-file holds the database password. Deploy removes it, but a build that fails
+        // or is aborted in between would leave it in the workspace.
+        sh "rm -f .env.deploy || true"
 
-      archiveArtifacts artifacts: 'trivy-*.txt, trivy-*.json, trivy-*.html', allowEmptyArchive: true
+        // 2>&1 because Spring writes its startup log to stderr.
+        sh 'docker logs ${CONTAINER} > docker-logs.txt 2>&1 || true'
+        archiveArtifacts artifacts: 'docker-logs.txt', allowEmptyArchive: true
 
-      // Requires the HTML Publisher plugin.
-      publishHTML(target: [
-        allowMissing: true,
-        alwaysLinkToLastBuild: true,
-        keepAll: true,
-        reportDir: '.',
-        reportFiles: 'trivy-image-report.html',
-        reportName: 'Trivy Vulnerability Report'
-      ])
+        archiveArtifacts artifacts: 'trivy-*.txt, trivy-*.json, trivy-*.html', allowEmptyArchive: true
 
-      // The builder image carries the whole Maven dependency tree — don't leave it behind.
-      sh "docker image rm -f ${IMAGE}:builder-${TAG} || true"
-      sh 'docker image prune -f --filter "until=168h" || true'
+        // Requires the HTML Publisher plugin.
+        publishHTML(target: [
+          allowMissing: true,
+          alwaysLinkToLastBuild: true,
+          keepAll: true,
+          reportDir: '.',
+          reportFiles: 'trivy-image-report.html',
+          reportName: 'Trivy Vulnerability Report'
+        ])
+
+        // The builder image carries the whole Maven dependency tree — don't leave it behind.
+        sh "docker image rm -f ${IMAGE}:builder-${TAG} || true"
+        sh 'docker image prune -f --filter "until=168h" || true'
+      }
     }
+  }
+}
+
+// Mail is best-effort: missing SMTP config must not fail a good deploy.
+def notify(String result, String text) {
+  try {
+    mail to: env.RECIPIENTS,
+         subject: "Jenkins Build ${result}: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
+         body: text
+  } catch (e) {
+    echo "Mail not sent (${e.message}). Configure SMTP under Manage Jenkins > System."
   }
 }
