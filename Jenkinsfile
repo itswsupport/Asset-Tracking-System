@@ -64,7 +64,9 @@ pipeline {
     DOCKER_NETWORK = 'ams-net'
 
     // Database — SHARED credentials, the same three the TMS backend uses. DB_URL is the base
-    // url WITH a trailing slash, so the jdbc url is composed as ${DB_URL}${DB_NAME}. Its host
+    // url (jdbc:mysql://host:3309, with or without a trailing slash); the Deploy stage
+    // composes ${DB_URL%/}/${DB_NAME}, as the Sustainability backend does — the stored
+    // credential has NO trailing slash, and plain ${DB_URL}${DB_NAME} gave "3309db_asset". Its host
     // must be one THIS Docker host can route to (see the TMS Jenkinsfile for the full story:
     // not the 192.168.100.30 office address on a public host). The database is on 3309.
     DB_URL      = credentials('DB_URL')
@@ -262,7 +264,7 @@ pipeline {
           set +x
           umask 077
           cat > .env.deploy <<EOF
-SPRING_DATASOURCE_URL=\${DB_URL}\${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048
+SPRING_DATASOURCE_URL=\${DB_URL%/}/\${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048
 SPRING_DATASOURCE_USERNAME=\${DB_USERNAME}
 SPRING_DATASOURCE_PASSWORD=\${DB_PASSWORD}
 LOGIN_PASSWORD_VERIFY=\${LOGIN_PASSWORD_VERIFY}
@@ -322,8 +324,18 @@ EOF
         //     unreachable, the exact trap the TMS smoke test once fell into.
         //  2. SECURITY — /device/list/ without a token must be refused with HTTP 401. A 200
         //     there means the API is open to anyone, and the deploy is failed.
+        //
+        // set +x keeps the 120 polling lines out of the log, and the loop stops as soon as the
+        // container has restarted: a crash at startup (bad DB url, missing secret) restarts it
+        // over and over, and there is no point waiting out the full two minutes.
         sh """
+          set +x
           for i in \$(seq 1 120); do
+            RESTARTS=\$(docker inspect -f '{{.RestartCount}}' ${CONTAINER} 2>/dev/null || echo 0)
+            if [ "\$RESTARTS" -gt 0 ]; then
+              echo "${CONTAINER} crashed during startup and has restarted \$RESTARTS time(s) — see the log below"
+              break
+            fi
             BODY=\$(curl -fsS -X POST "http://localhost:${HOST_PORT}/login/?emp_code=0&emp_pass=smoketest" 2>/dev/null || true)
             if echo "\$BODY" | grep -Eq '"status_code" ?: ?500'; then
               echo "backend answering, database reachable, after \${i}s"
