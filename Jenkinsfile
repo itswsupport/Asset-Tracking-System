@@ -325,6 +325,11 @@ EOF
         //  2. SECURITY — /device/list/ without a token must be refused with HTTP 401. A 200
         //     there means the API is open to anyone, and the deploy is failed.
         //
+        // Both requests run INSIDE the backend container (docker exec, the image has curl) against
+        // 127.0.0.1:${CONTAINER_PORT}. Jenkins itself runs in a container (jenkins-test), where
+        // localhost is Jenkins, not the Docker host, so curl to localhost:${HOST_PORT} from here
+        // never gets an answer even when the backend is up.
+        //
         // set +x keeps the 120 polling lines out of the log, and the loop stops as soon as the
         // container has restarted: a crash at startup (bad DB url, missing secret) restarts it
         // over and over, and there is no point waiting out the full two minutes.
@@ -336,10 +341,10 @@ EOF
               echo "${CONTAINER} crashed during startup and has restarted \$RESTARTS time(s) — see the log below"
               break
             fi
-            BODY=\$(curl -fsS -X POST "http://localhost:${HOST_PORT}/login/?emp_code=0&emp_pass=smoketest" 2>/dev/null || true)
+            BODY=\$(docker exec ${CONTAINER} curl -fsS -X POST "http://127.0.0.1:${CONTAINER_PORT}/login/?emp_code=0&emp_pass=smoketest" 2>/dev/null || true)
             if echo "\$BODY" | grep -Eq '"status_code" ?: ?500'; then
               echo "backend answering, database reachable, after \${i}s"
-              CODE=\$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${HOST_PORT}/device/list/")
+              CODE=\$(docker exec ${CONTAINER} curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${CONTAINER_PORT}/device/list/")
               if [ "\$CODE" = "401" ]; then
                 echo "security on: /device/list/ without a token -> 401"
                 exit 0
