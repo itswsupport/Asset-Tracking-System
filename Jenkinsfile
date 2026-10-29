@@ -126,24 +126,34 @@ pipeline {
         // pom.xml; target/ and bin/ are stale local build output; and the network analyzers
         // are disabled because they are what make this stage hang on rate-limited lookups.
         // Its own timeout so a stall fails this stage instead of the whole pipeline.
-        timeout(time: 10, unit: 'MINUTES') {
-          dependencyCheck additionalArguments: """
-            --scan .
-            --exclude "**/target/**"
-            --exclude "**/bin/**"
-            --disableCentral
-            --disableOssIndex
-            --disableNodeAudit
-            --disableRetireJS
-            --disableAssembly
-            --format HTML
-            --format XML
-            --out .
-            --prettyPrint
-          """, odcInstallation: 'Dependency-Check'
-        }
+        //
+        // Skipped, not failed, when the OWASP Dependency-Check plugin is not installed on this
+        // controller (NoSuchMethodError "No such DSL method 'dependencyCheck'"): the scan is a
+        // report, not a deploy gate. Installing the plugin turns it on with no change here.
+        script {
+          try {
+            timeout(time: 10, unit: 'MINUTES') {
+              dependencyCheck additionalArguments: """
+                --scan .
+                --exclude "**/target/**"
+                --exclude "**/bin/**"
+                --disableCentral
+                --disableOssIndex
+                --disableNodeAudit
+                --disableRetireJS
+                --disableAssembly
+                --format HTML
+                --format XML
+                --out .
+                --prettyPrint
+              """, odcInstallation: 'Dependency-Check'
+            }
 
-        dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+            dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+          } catch (NoSuchMethodError e) {
+            echo 'OWASP Dependency-Check plugin not installed - scan skipped. Install it under Manage Jenkins > Plugins.'
+          }
+        }
       }
     }
 
@@ -410,15 +420,20 @@ Console output: ${env.BUILD_URL}console
 
         archiveArtifacts artifacts: 'trivy-*.txt, trivy-*.json, trivy-*.html', allowEmptyArchive: true
 
-        // Requires the HTML Publisher plugin.
-        publishHTML(target: [
-          allowMissing: true,
-          alwaysLinkToLastBuild: true,
-          keepAll: true,
-          reportDir: '.',
-          reportFiles: 'trivy-image-report.html',
-          reportName: 'Trivy Vulnerability Report'
-        ])
+        // Requires the HTML Publisher plugin; without it the report is still in the archived
+        // trivy-image-report.html, so skip rather than fail the build.
+        try {
+          publishHTML(target: [
+            allowMissing: true,
+            alwaysLinkToLastBuild: true,
+            keepAll: true,
+            reportDir: '.',
+            reportFiles: 'trivy-image-report.html',
+            reportName: 'Trivy Vulnerability Report'
+          ])
+        } catch (NoSuchMethodError e) {
+          echo 'HTML Publisher plugin not installed - Trivy report only archived as an artifact.'
+        }
 
         // The builder image carries the whole Maven dependency tree — don't leave it behind.
         sh "docker image rm -f ${IMAGE}:builder-${TAG} || true"
