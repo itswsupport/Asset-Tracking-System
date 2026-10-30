@@ -43,6 +43,10 @@ public class ReportingPersonBO {
 	@JsonProperty("role")
 	private String role;
 
+	/** The roles given, as Role Master ids — "1,4". The screen sends and reads this. */
+	@JsonProperty("role_id")
+	private String role_id;
+
 	/** yyyy-MM-dd and HH:mm, so the UI can print them without parsing anything. */
 	@JsonProperty("create_date")
 	@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
@@ -112,6 +116,14 @@ public class ReportingPersonBO {
 
 	public void setEmp_name(String emp_name) {
 		this.emp_name = emp_name;
+	}
+
+	public String getRole_id() {
+		return role_id;
+	}
+
+	public void setRole_id(String role_id) {
+		this.role_id = role_id;
 	}
 
 	public String getRole() {

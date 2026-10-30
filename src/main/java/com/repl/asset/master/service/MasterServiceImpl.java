@@ -76,6 +76,9 @@ public class MasterServiceImpl implements IMasterService {
 	@Autowired
 	private DeviceMasterRepository deviceMasterRepository;
 
+	@Autowired
+	private RoleService roleService;
+
 	@Override
 	@Transactional(readOnly = true)
 	public List<CompanyBO> getCompanyList() {
@@ -709,12 +712,38 @@ public class MasterServiceImpl implements IMasterService {
 		return joined;
 	}
 
+	/**
+	 * THE ROLE(S) OF A LOGIN ACCESS ROW, from Role Master.
+	 *
+	 * The screen sends the roles picked by id (role_id "1,4"): role_id keeps those ids and role
+	 * gets their access types ("ADMIN,USER"), which login and the permissions read. A request
+	 * with role codes only ("ADMIN,USER", no role_id) maps them onto the built-in roles' ids.
+	 * A role the person already holds (savedRole / savedRoleId) stays allowed even if inactive.
+	 */
+	private void applyRoles(AmsLoginAccess row, ReportingPersonBO in, String savedRole, String savedRoleId)
+			throws ApplicationException {
+		if (!isBlank(in.getRole_id())) {
+			String[] resolved = roleService.resolve(in.getRole_id(), savedRoleId);
+			row.setRole(resolved[0]);
+			row.setRoleId(resolved[1]);
+			return;
+		}
+		// "USER", "ADMIN", "ADMIN,USER" or "VIEWER" — checked and put in order (AmsRoles).
+		String role = AmsRoles.normalise(in.getRole());
+		row.setRoleId(roleService.toRoleIds(role, savedRole));
+		row.setRole(role);
+	}
+
+	private static boolean isBlank(String s) {
+		return s == null || s.isBlank();
+	}
+
 	@Override
 	@Transactional
 	public ReportingPersonBO saveReportingPerson(ReportingPersonBO in) throws ApplicationException {
 
 		if (in == null || in.getEmp_code() == null
-				|| in.getRole() == null || in.getRole().isBlank()
+				|| (isBlank(in.getRole()) && isBlank(in.getRole_id()))
 				|| in.getCompany_name() == null || in.getCompany_name().isBlank()
 				|| in.getPlant_code() == null || in.getPlant_code().isBlank()) {
 			throw new ApplicationException(IResponseCode.INVALID_DATA,
@@ -788,8 +817,7 @@ public class MasterServiceImpl implements IMasterService {
 		String first = employee.getEmpFname() == null ? "" : employee.getEmpFname().trim();
 		String last = employee.getEmpLname() == null ? "" : employee.getEmpLname().trim();
 		row.setEmpName((first + " " + last).trim());
-		// "USER", "ADMIN", "ADMIN,USER" or "VIEWER" — checked and put in order (AmsRoles).
-		row.setRole(AmsRoles.normalise(in.getRole()));
+		applyRoles(row, in, null, null);
 		row.setDescription(in.getDescription());
 		// Active unless the form says otherwise. Inactive means the assignment is on record
 		// but the person cannot sign in — login filters on status = 1.
@@ -850,8 +878,8 @@ public class MasterServiceImpl implements IMasterService {
 		row.setCompanyName(in.getCompany_name());
 		row.setPlantCode(plantCodes);
 		row.setDeviceIds(deviceIds);
-		// "USER", "ADMIN", "ADMIN,USER" or "VIEWER" — checked and put in order (AmsRoles).
-		row.setRole(AmsRoles.normalise(in.getRole()));
+		// Same as the save; a role this person already holds stays allowed even if inactive.
+		applyRoles(row, in, row.getRole(), row.getRoleId());
 		row.setDescription(in.getDescription());
 		if (in.getStatus() != null) {
 			row.setStatus(in.getStatus() == Constants.STATUS_INACTIVE
@@ -892,6 +920,7 @@ public class MasterServiceImpl implements IMasterService {
 		bo.setEmp_code(entity.getEmpCode());
 		bo.setEmp_name(entity.getEmpName());
 		bo.setRole(entity.getRole());
+		bo.setRole_id(entity.getRoleId());
 		bo.setDescription(entity.getDescription());
 		bo.setCreate_date(entity.getCreateDate());
 		bo.setCreate_time(entity.getCreateTime());
