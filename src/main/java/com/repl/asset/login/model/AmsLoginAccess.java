@@ -73,6 +73,14 @@ public class AmsLoginAccess {
 	@Column(name = "role", nullable = false, length = 20)
 	private String role;
 
+	/**
+	 * The same role(s) as ams_role_master ids, comma separated in the same order — "1,2" for
+	 * ADMIN,USER. Written together with role on every save (RoleService.toRoleIds); login and
+	 * the token still read role.
+	 */
+	@Column(name = "role_id", length = 50)
+	private String roleId;
+
 	/** 1 = access enabled, 0 = revoked. */
 	/** A free-text note beside the row. */
 	@Column(name = "description", length = 255)
@@ -180,6 +188,14 @@ public class AmsLoginAccess {
 
 	public void setRole(String role) {
 		this.role = role;
+	}
+
+	public String getRoleId() {
+		return roleId;
+	}
+
+	public void setRoleId(String roleId) {
+		this.roleId = roleId;
 	}
 
 	public String getDescription() {
