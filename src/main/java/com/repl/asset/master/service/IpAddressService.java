@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,10 @@ public class IpAddressService {
 
 	@Autowired
 	private IpAddressMasterRepository ipAddressMasterRepository;
+
+	/** An IPv4 address: four numbers 0-255 joined by dots, e.g. 192.168.10.55. */
+	private static final Pattern IPV4 = Pattern
+			.compile("^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$");
 
 	/**
 	 * Active AND inactive, everything but deleted.
@@ -129,6 +134,10 @@ public class IpAddressService {
 		String address = in == null || in.getIp_address() == null ? "" : in.getIp_address().trim();
 		if (address.isEmpty()) {
 			throw new ApplicationException(IResponseCode.INVALID_DATA, "IP address is required.");
+		}
+		if (!IPV4.matcher(address).matches()) {
+			throw new ApplicationException(IResponseCode.INVALID_DATA,
+					"Enter a valid IP address: four numbers from 0 to 255 separated by dots, e.g. 192.168.10.55.");
 		}
 		return address;
 	}
