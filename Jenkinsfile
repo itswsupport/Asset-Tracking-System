@@ -1,25 +1,28 @@
-// AMS backend (Asset-Tracking-System) — build, package and deploy the Spring Boot container.
-// Same pipeline as the TMS backend, with this project's values.
+// AMS Backend (Asset-Tracking-System) — build, test, scan and deploy the API container.
 //
-// The agent needs Docker only: Maven and the JDK (21) run inside the builder image.
+// Mirrors the Sustainability backend pipeline: same parameters, the same OWASP and Trivy
+// scans, the same port preflight before a deploy, the same health check and the same
+// reports. What differs is this project's own values — the ams-backend container on the
+// ams-net network the AMS UI proxies to, the db_asset schema, the ams-jwt-secret — and a
+// final check of the AMS UI instead of mail links (this backend sends no mail).
 //
-// NOTE ON SECRETS: the datasource url, username and password come from the shared Jenkins
-// credentials the rest of the fleet already uses — DB_URL, DB_USERNAME and db-password
-// (Global > Secret text), the same three the TMS backend reads — plus AMS's own JWT secret,
-// 'ams-jwt-secret', which signs the sign-in tokens. They are deliberately NOT in this file. The container overrides only the datasource properties (and the login check
-// below) through environment variables; application.properties is left as it is for local
-// work, and a database change needs no image rebuild.
-//
-// If the build fails at the start or at Deploy, check those four entries exist on this
-// controller.
+// SECRETS are Jenkins credentials (Manage Jenkins > Credentials > Global > Secret text),
+// never in this file:
+//   DB_URL          jdbc:mysql://192.168.100.30:3309   (shared with CLMS / PRPO / Sustainability)
+//   DB_USERNAME     (shared)
+//   db-password     (shared)
+//   ams-jwt-secret  AMS's own, 32+ characters — signs the sign-in tokens
+//   nvd-api-key     the NVD API key the OWASP scan needs (shared with Sustainability)
 
 pipeline {
-  agent any
+  // Runs on the controller (the jenkins-test container). It already has Java 21 and git, and
+  // mvnw fetches Maven; it needs the Docker CLI and the host's /var/run/docker.sock mounted
+  // for the Docker stages.
+  agent { label 'built-in' }
 
   triggers {
-    // GitHub can't reach 192.168.100.30 (private LAN), so a push webhook never arrives.
-    // Poll instead, as the Sustainability backend does; switch to githubPush() if Jenkins
-    // is ever exposed.
+    // GitHub can't reach 192.168.100.30 (private LAN), so a push webhook never arrives. Poll
+    // instead; switch to githubPush() if Jenkins is ever exposed.
     pollSCM('H/5 * * * *')
   }
 
@@ -30,8 +33,37 @@ pipeline {
     timeout(time: 45, unit: 'MINUTES')
   }
 
+  parameters {
+    string(
+      name: 'BRANCH',
+      defaultValue: 'main',
+      description: 'Branch of Asset-Tracking-System to build. Work goes local-bk-ams -> develop -> main; main is the one deployed.'
+    )
+    string(
+      name: 'HOST_PORT',
+      defaultValue: '9095',
+      description: 'Port on the Docker host to publish the API on (container port 8080). The AMS UI does not use it — it reaches ams-backend:8080 over the ams-net network — it is for the smoke test and for curl. 9096 is Sustainability, 9097 PRPO, 9098 clms-backend, 9099 attendance-sync-service.'
+    )
+    string(
+      name: 'UI_URL',
+      defaultValue: 'http://192.168.100.30:3023',
+      description: 'Address users open the AMS UI at (the AMS_UI job publishes it on 3023). Checked after deploy: its login page /Login/ams/ and its /api proxy to this backend. No trailing slash.'
+    )
+    booleanParam(
+      name: 'DEPLOY',
+      defaultValue: true,
+      description: 'Untick to build, test and scan only, without replacing the running container.'
+    )
+    booleanParam(
+      name: 'FAIL_ON_VULNERABILITIES',
+      defaultValue: false,
+      description: 'Tick to fail the build when Trivy finds CRITICAL/HIGH issues instead of only reporting them.'
+    )
+  }
+
   environment {
     RECIPIENTS = 'ruchatest4@gmail.com'
+    REPO_URL   = 'https://github.com/itswsupport/Asset-Tracking-System.git'
 
     // Image and container name. The CONTAINER name is what the AMS UI proxies to —
     // BACKEND_ORIGIN = 'http://ams-backend:8080' in the AMS_UI Jenkinsfile — so it must not
@@ -40,127 +72,127 @@ pipeline {
     CONTAINER  = 'ams-backend'
     TAG        = "${env.BUILD_NUMBER}"
 
-    // Unlike TMS (whose Maven project sits in repl/), pom.xml and this Dockerfile are at the
-    // repository root, so everything below builds from the workspace root.
-
-    // The port INSIDE the container: Spring's default, since application.properties sets no
-    // server.port. The UI reaches it as ams-backend:8080 over the Docker network.
-    CONTAINER_PORT = '8080'
-
-    // Port on the Docker HOST, used only by this pipeline's smoke test and by a human with
-    // curl — the UI does not use it. NOT 8080: Jenkins itself normally listens on 8080 on the
-    // host. NOT 9098 either: that is clms-backend (and payRoll). Taken on this server:
-    // 9096 Sustainability, 9097 PRPO, 9098 clms-backend, 9099 attendance-sync-service.
-    // The Deploy preflight fails the build if anything else holds it.
-    HOST_PORT  = '9095'
-
-    // No server.servlet.context-path: the backend serves from the root, which is why the
-    // UI's rewrite strips /api (/api/device/list/ -> /device/list/).
-
-    // Docker network shared with the UI container (ui-ams). Container-name DNS only exists
-    // on user-defined networks; on the default bridge the UI's proxy fails with
-    // "getaddrinfo EAI_AGAIN ams-backend". The UI pipeline creates the same network, so
-    // whichever job deploys first brings it into being.
+    // Docker network shared with the UI container (ui-ams). Container-name DNS only exists on
+    // user-defined networks; on the default bridge the UI's proxy fails with
+    // "getaddrinfo EAI_AGAIN ams-backend". Whichever job deploys first creates it.
     DOCKER_NETWORK = 'ams-net'
 
-    // Database — SHARED credentials, the same three the TMS backend uses. DB_URL is the base
-    // url (jdbc:mysql://host:3309, with or without a trailing slash); the Deploy stage
-    // composes ${DB_URL%/}/${DB_NAME}, as the Sustainability backend does — the stored
-    // credential has NO trailing slash, and plain ${DB_URL}${DB_NAME} gave "3309db_asset". Its host
-    // must be one THIS Docker host can route to (see the TMS Jenkinsfile for the full story:
-    // not the 192.168.100.30 office address on a public host). The database is on 3309.
-    DB_URL      = credentials('DB_URL')
+    // Database — the SHARED credentials. DB_URL is the base url with no schema; the schema is
+    // added with ${DB_BASE_URL%/}/${DB_NAME}, so a stored value with or without a trailing
+    // slash both work. useSSL=false and allowPublicKeyRetrieval=true: this MySQL offers only
+    // TLS versions a modern JDK has disabled. The batching options repeat the ones in
+    // application.properties (bulk upload relies on rewriteBatchedStatements), because
+    // SPRING_DATASOURCE_URL replaces that whole url.
+    DB_BASE_URL = credentials('DB_URL')
     DB_USERNAME = credentials('DB_USERNAME')
     DB_PASSWORD = credentials('db-password')
-
-    // AMS's own schema (application.properties), NOT db_ems — that one is TMS's.
     DB_NAME     = 'db_asset'
+    DB_OPTIONS  = 'useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048'
 
     // Signs the sign-in tokens (JWT) — every API but /login and /logout needs one. AMS's OWN
-    // secret, not shared with TMS: a token from one app must not open the other. Create it once
-    // as Global > Secret text, id 'ams-jwt-secret', 32+ random characters. If it is missing the
-    // build stops here; application.properties' development default is never used.
+    // secret, not shared with any other app: a token from one app must not open another.
     JWT_SECRET  = credentials('ams-jwt-secret')
 
     // >> CURRENTLY OFF for the test deployment. <<
     // 'false' skips the BCrypt check against emp_details.emp_pass: anyone who knows a
-    // registered employee code can sign in as that employee, with any password or none.
-    // The employee must still be active in emp_details AND hold an active ams_login_access
-    // row, and the role still comes from there. LoginServiceImpl logs a WARN on every
-    // sign-in while this is off. Set back to 'true' once real passwords are in use.
+    // registered employee code can sign in as that employee. The employee must still be active
+    // and hold an active ams_login_access row, and the role still comes from there.
+    // LoginServiceImpl logs a WARN on every sign-in while this is off. Set back to 'true' once
+    // real passwords are in use.
     LOGIN_PASSWORD_VERIFY = 'false'
 
-    // Trivy configuration. '1' fails the build on findings; '0' reports and carries on,
-    // which is what the rest of the fleet does.
-    TRIVY_SEVERITY  = 'CRITICAL,HIGH'
-    TRIVY_EXIT_CODE = '0'
+    // Trivy configuration
+    TRIVY_SEVERITY = 'CRITICAL,HIGH'
+
+    // Jenkins itself runs in a container, so "localhost" in an sh step is the Jenkins
+    // container, not the Docker host the API's port is published on. curl runs in a throwaway
+    // container on the host's network instead, which tests the published port for real.
+    CURL = 'docker run --rm --network host curlimages/curl:8.11.1'
   }
 
   stages {
-    // Repo and branch stated here, the same way the AMS UI Jenkinsfile does it, so the
-    // pipeline always deploys main whatever branch the job happens to be pointed at.
-    // Work goes local-bk-ams -> develop -> main; only main is deployed.
-    stage('Checkout') {
+    stage('Checkout Code') {
       steps {
         git(
-          url: 'https://github.com/itswsupport/Asset-Tracking-System.git',
-          branch: 'main',
+          url: env.REPO_URL,
+          branch: "${params.BRANCH ?: 'main'}",
           credentialsId: 'ui-payroll'
         )
         script {
           env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.TRIVY_EXIT_CODE = params.FAIL_ON_VULNERABILITIES ? '1' : '0'
+          // On the first run after a parameter is added Jenkins has not registered it yet and
+          // it reads as null — fall back to the default.
+          env.HOST_PORT = params.HOST_PORT ?: '9095'
+
+          def ui = (params.UI_URL ?: 'http://192.168.100.30:3023').trim().replaceAll('/+$', '')
+          if (!(ui ==~ /https?:\/\/[^\/\s]+(\/\S*)?/)) {
+            error "UI_URL must be a full http:// or https:// address — got '${ui}'"
+          }
+          env.UI_URL = ui
         }
-        echo "Building ${env.IMAGE}:${env.TAG} from ${env.GIT_SHA}"
+        echo "Building ${env.IMAGE}:${env.TAG} from ${env.GIT_SHA} (branch ${params.BRANCH ?: 'main'})"
       }
     }
 
-    stage('Build') {
+    stage('Build & Test') {
       steps {
-        // --target builder stops after `mvn package`, so a compile failure is reported
-        // before any runtime image is assembled.
-        sh "docker build --target builder -t ${IMAGE}:builder-${TAG} ."
+        sh 'chmod +x mvnw'
+        // AssetTrackingSystemApplicationTests boots the full Spring context against MySQL
+        // (there is no in-memory database), so the tests get the same datasource and JWT
+        // secret the container will. retry(2): one flaky database connection does not fail
+        // the build; a real compile or test error fails both tries.
+        retry(2) {
+          sh '''
+            export SPRING_DATASOURCE_URL="${DB_BASE_URL%/}/${DB_NAME}?${DB_OPTIONS}"
+            export SPRING_DATASOURCE_USERNAME="${DB_USERNAME}"
+            export SPRING_DATASOURCE_PASSWORD="${DB_PASSWORD}"
+            ./mvnw -B clean package
+          '''
+        }
+      }
+      post {
+        always { junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true }
       }
     }
 
     stage('OWASP Dependency Check') {
       steps {
-        // Same flags as the TMS backend: the build happens inside Docker, so the scan reads
-        // pom.xml; target/ and bin/ are stale local build output; and the network analyzers
-        // are disabled because they are what make this stage hang on rate-limited lookups.
-        // Its own timeout so a stall fails this stage instead of the whole pipeline.
+        // The CLI is run directly rather than through the dependencyCheck step so the NVD API
+        // key reaches it as an environment variable and is never interpolated into the Groovy
+        // string. Dependency-Check 12+ will not download the NVD data without a key. The
+        // database is kept under the tool's install directory, so only the first run
+        // downloads it in full.
         //
-        // Skipped, not failed, when the OWASP Dependency-Check plugin is not installed on this
-        // controller (NoSuchMethodError "No such DSL method 'dependencyCheck'"): the scan is a
-        // report, not a deploy gate. Installing the plugin turns it on with no change here.
-        script {
-          try {
-            timeout(time: 10, unit: 'MINUTES') {
-              dependencyCheck additionalArguments: """
-                --scan .
-                --exclude "**/target/**"
-                --exclude "**/bin/**"
-                --disableCentral
-                --disableOssIndex
-                --disableNodeAudit
-                --disableRetireJS
-                --disableAssembly
-                --format HTML
-                --format XML
-                --out .
-                --prettyPrint
-              """, odcInstallation: 'Dependency-Check'
-            }
+        // Scans the packaged jar: it holds every library that actually ships, transitive ones
+        // included, and nothing that is test- or build-only. (The .jar.original
+        // spring-boot-maven-plugin leaves beside it does not match *.jar.)
+        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+          sh """
+            if [ -z "\$NVD_API_KEY" ]; then
+              echo "the nvd-api-key credential is empty — paste the NVD API key into its Secret field"
+              exit 1
+            fi
 
-            dependencyCheckPublisher pattern: 'dependency-check-report.xml'
-          } catch (NoSuchMethodError e) {
-            echo 'OWASP Dependency-Check plugin not installed - scan skipped. Install it under Manage Jenkins > Plugins.'
-          }
+            "${tool 'Dependency-Check'}/bin/dependency-check.sh" \
+              --project '${IMAGE}' \
+              --scan 'target/*.jar' \
+              --format HTML \
+              --format XML \
+              --out . \
+              --prettyPrint \
+              --nvdApiKey "\$NVD_API_KEY"
+          """
         }
+
+        dependencyCheckPublisher pattern: 'dependency-check-report.xml'
       }
     }
 
     stage('Package') {
       steps {
+        // The Dockerfile builds the jar again inside its own Maven stage (tests skipped there:
+        // they already ran above), so the image never depends on the agent's target/.
         sh """
           docker build \
             -t ${IMAGE}:${TAG} \
@@ -173,6 +205,13 @@ pipeline {
     stage('Trivy FS Scan') {
       steps {
         sh '''
+          # Every trivy call below ends in "|| true", so without this a missing trivy binary
+          # passes every scan stage and the quality gate reports zero vulnerabilities.
+          command -v trivy >/dev/null || {
+            echo "trivy is not installed on the Jenkins agent — the security scans cannot run"
+            exit 1
+          }
+
           trivy fs --format table \
             --severity ${TRIVY_SEVERITY} \
             --exit-code ${TRIVY_EXIT_CODE} \
@@ -237,6 +276,9 @@ pipeline {
 
           if (vulnCount > 0) {
             echo "WARNING: Found ${vulnCount} CRITICAL vulnerabilities!"
+            if (params.FAIL_ON_VULNERABILITIES) {
+              error "Failing build: ${vulnCount} CRITICAL vulnerabilities (FAIL_ON_VULNERABILITIES is ticked)"
+            }
           } else {
             echo "No CRITICAL vulnerabilities found."
           }
@@ -245,135 +287,181 @@ pipeline {
     }
 
     stage('Deploy') {
+      when { expression { return params.DEPLOY } }
       steps {
-        // The settings go into a root-only env-file rather than -e arguments, so the password
-        // does not appear in the host process list or the build log; `set +x` for the same
-        // reason. Every secret is written \${...} — expanded by the SHELL, not by Groovy —
-        // so it never appears in the rendered script.
-        //
-        // SPRING_DATASOURCE_URL replaces the whole url from application.properties, so the
-        // batching options it carries are repeated here (bulk upload relies on
-        // rewriteBatchedStatements). useSSL=false and allowPublicKeyRetrieval=true for the
-        // same reason as TMS: this MySQL offers only TLS versions a modern JDK has disabled,
-        // so the handshake would fail and read like the server is unreachable.
-        //
-        // LOGIN_PASSWORD_VERIFY comes from the environment block above (currently 'false':
-        // password check skipped). It overrides login.password.verify in
-        // application.properties, so the deployed setting is decided here, not by that file.
-        sh """
-          set +x
-          umask 077
-          cat > .env.deploy <<EOF
-SPRING_DATASOURCE_URL=\${DB_URL%/}/\${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048
-SPRING_DATASOURCE_USERNAME=\${DB_USERNAME}
-SPRING_DATASOURCE_PASSWORD=\${DB_PASSWORD}
-LOGIN_PASSWORD_VERIFY=\${LOGIN_PASSWORD_VERIFY}
-JWT_SECRET=\${JWT_SECRET}
-EOF
+        // Single quotes: the shell expands the secrets, so they never appear in the
+        // Groovy-interpolated command Jenkins logs. "-e NAME" with no value passes the
+        // variable through without printing it.
+        sh '''
+          set -e
 
-          # Preflight: fail the build, rather than take the backend down, if the host port
-          # belongs to some other container or to a process outside Docker (e.g. Jenkins).
-          OTHERS=\$(docker ps --filter "publish=${HOST_PORT}" --format '{{.Names}}' | grep -vx "${CONTAINER}" || true)
-          if [ -n "\$OTHERS" ]; then
-            echo "port ${HOST_PORT} is already published by container(s): \$OTHERS"
+          # Preflight. Nothing is torn down until the port is known to be ours to take, so a
+          # port held by something else fails the build instead of taking the running API —
+          # and every UI request with it — down.
+          OTHERS=$(docker ps --filter "publish=${HOST_PORT}" --format '{{.Names}}' | grep -vx "${CONTAINER}" || true)
+          if [ -n "$OTHERS" ]; then
+            echo "port ${HOST_PORT} is already published by container(s): $OTHERS"
             echo "the running ${CONTAINER} has been left untouched — free that port or pick another HOST_PORT"
-            rm -f .env.deploy
             exit 1
           fi
-          if [ -z "\$(docker ps -q -f name=^${CONTAINER}\$)" ]; then
+
+          # With our own container not running, any listener on the port belongs to something
+          # outside Docker.
+          if [ -z "$(docker ps -q -f name="^${CONTAINER}$")" ]; then
             if ss -ltn 2>/dev/null | grep -q ":${HOST_PORT} "; then
               echo "port ${HOST_PORT} is held by a process on the host, not by Docker:"
               ss -ltnp 2>/dev/null | grep ":${HOST_PORT} " || true
-              rm -f .env.deploy
               exit 1
             fi
           fi
 
-          # Idempotent: `create` fails once the network exists, the normal case after the
-          # first build.
+          # Idempotent: `create` fails once the network exists, the normal case.
           docker network create ${DOCKER_NETWORK} 2>/dev/null || true
 
           docker rm -f ${CONTAINER} || true
 
+          # docker-proxy can keep the binding for a moment after the container goes. Wait for
+          # it to let go rather than racing it.
+          for i in $(seq 1 15); do
+            ss -ltn 2>/dev/null | grep -q ":${HOST_PORT} " || break
+            sleep 1
+          done
+
+          export SPRING_DATASOURCE_URL="${DB_BASE_URL%/}/${DB_NAME}?${DB_OPTIONS}"
+          export SPRING_DATASOURCE_USERNAME="${DB_USERNAME}"
+          export SPRING_DATASOURCE_PASSWORD="${DB_PASSWORD}"
+
+          # HOST_PORT:8080 — the right-hand side is Spring's port INSIDE the container, fixed
+          # by SERVER_PORT in the image. Only the left-hand side is yours to choose.
           # -m gives the container a memory limit, which the image's MaxRAMPercentage=75.0
           # sizes the heap against — without it, 75% of the whole host's RAM.
           docker run -d \
             --name ${CONTAINER} \
             --network ${DOCKER_NETWORK} \
             --restart unless-stopped \
-            --env-file .env.deploy \
             -m 1536m \
-            -p ${HOST_PORT}:${CONTAINER_PORT} \
+            -p ${HOST_PORT}:8080 \
+            -e TZ=Asia/Kolkata \
+            -e SPRING_DATASOURCE_URL \
+            -e SPRING_DATASOURCE_USERNAME \
+            -e SPRING_DATASOURCE_PASSWORD \
+            -e JWT_SECRET \
+            -e LOGIN_PASSWORD_VERIFY \
             ${IMAGE}:${TAG}
-
-          rm -f .env.deploy
-        """
+        '''
       }
     }
 
-    stage('Smoke test') {
+    stage('Health Check') {
+      when { expression { return params.DEPLOY } }
       steps {
-        // Spring Boot plus JPA takes a while to come up, hence the long window.
-        //
-        // Two checks, because every API but /login and /logout now needs a sign-in token:
+        // The image's HEALTHCHECK signs in as employee 0 (a real database query) and has a 90s
+        // start period, and Spring Boot with JPA can take a while against MySQL, so allow
+        // 3 minutes. A container that crashes at startup (bad DB url, missing secret) is
+        // restarted over and over — stop at the first restart instead of waiting it out.
+        sh '''
+          set +x
+          for i in $(seq 1 36); do
+            RESTARTS=$(docker inspect -f '{{.RestartCount}}' ${CONTAINER} 2>/dev/null || echo 0)
+            if [ "$RESTARTS" -gt 0 ]; then
+              echo "${CONTAINER} crashed during startup and has restarted $RESTARTS time(s)"
+              break
+            fi
+            status=$(docker inspect -f '{{.State.Health.Status}}' ${CONTAINER} 2>/dev/null || echo missing)
+            echo "health: $status"
+            [ "$status" = "healthy" ] && exit 0
+            [ "$status" = "missing" ] && break
+            sleep 5
+          done
+          echo "container did not become healthy within 3 minutes"
+          docker logs --tail 150 ${CONTAINER} || true
+          exit 1
+        '''
+      }
+    }
+
+    stage('Smoke Test') {
+      when { expression { return params.DEPLOY } }
+      steps {
+        // Healthy only means Spring answers inside the container. These call the PUBLISHED
+        // port from the host. Two checks:
         //
         //  1. DATABASE — a sign-in as employee 0, which does not exist. /login is open and the
         //     lookup is a real query: status_code 500 "User Not Found" means the database
-        //     answered; 501 means it did not. The BODY is checked, because this backend answers
-        //     HTTP 200 to everything — curl -f alone would pass a backend whose database is
-        //     unreachable, the exact trap the TMS smoke test once fell into.
+        //     answered. The BODY is checked: this backend answers HTTP 200 to everything and
+        //     puts the outcome in "status_code".
         //  2. SECURITY — /device/list/ without a token must be refused with HTTP 401. A 200
         //     there means the API is open to anyone, and the deploy is failed.
-        //
-        // Both requests run INSIDE the backend container (docker exec, the image has curl) against
-        // 127.0.0.1:${CONTAINER_PORT}. Jenkins itself runs in a container (jenkins-test), where
-        // localhost is Jenkins, not the Docker host, so curl to localhost:${HOST_PORT} from here
-        // never gets an answer even when the backend is up.
-        //
-        // set +x keeps the 120 polling lines out of the log, and the loop stops as soon as the
-        // container has restarted: a crash at startup (bad DB url, missing secret) restarts it
-        // over and over, and there is no point waiting out the full two minutes.
-        sh """
-          set +x
-          for i in \$(seq 1 120); do
-            RESTARTS=\$(docker inspect -f '{{.RestartCount}}' ${CONTAINER} 2>/dev/null || echo 0)
-            if [ "\$RESTARTS" -gt 0 ]; then
-              echo "${CONTAINER} crashed during startup and has restarted \$RESTARTS time(s) — see the log below"
-              break
-            fi
-            BODY=\$(docker exec ${CONTAINER} curl -fsS -X POST "http://127.0.0.1:${CONTAINER_PORT}/login/?emp_code=0&emp_pass=smoketest" 2>/dev/null || true)
-            if echo "\$BODY" | grep -Eq '"status_code" ?: ?500'; then
-              echo "backend answering, database reachable, after \${i}s"
-              CODE=\$(docker exec ${CONTAINER} curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${CONTAINER_PORT}/device/list/")
-              if [ "\$CODE" = "401" ]; then
-                echo "security on: /device/list/ without a token -> 401"
-                exit 0
-              fi
-              echo "SECURITY CHECK FAILED: /device/list/ without a token returned HTTP \$CODE, expected 401"
-              exit 1
-            fi
-            sleep 1
-          done
-          echo "backend did not answer the database check within 120s"
-          echo "--- last response ---"
-          echo "\$BODY" | head -c 500; echo
-          echo "(status_code 501 = Spring is up but the database query failed — check DB_URL / DB_NAME)"
-          docker ps -a --filter "name=${CONTAINER}" --format '{{.Names}}\\t{{.Status}}\\t{{.Ports}}'
-          docker logs --tail 80 ${CONTAINER}
-          exit 1
-        """
+        sh '''
+          BODY=$(${CURL} -s -X POST "http://localhost:${HOST_PORT}/login/?emp_code=0&emp_pass=smoketest" || true)
+          if echo "$BODY" | grep -Eq '"status_code" ?: ?500'; then
+            echo "API answering on port ${HOST_PORT}, database reachable"
+          else
+            echo "API is NOT answering correctly on port ${HOST_PORT}"
+            echo "response: $(echo "$BODY" | head -c 300)"
+            echo "(status_code 501 = Spring is up but the database query failed — check DB_URL / DB_NAME)"
+            docker logs --tail 50 ${CONTAINER}
+            exit 1
+          fi
+
+          CODE=$(${CURL} -s -o /dev/null -w '%{http_code}' "http://localhost:${HOST_PORT}/device/list/" || true)
+          if [ "$CODE" = "401" ]; then
+            echo "security on: /device/list/ without a token -> 401"
+          else
+            echo "SECURITY CHECK FAILED: /device/list/ without a token returned HTTP ${CODE:-nothing}, expected 401"
+            exit 1
+          fi
+        '''
+      }
+    }
+
+    stage('Verify AMS UI') {
+      when { expression { return params.DEPLOY } }
+      steps {
+        // Opens what a user opens: the UI's login page, and an API call through the UI's /api
+        // proxy, which reaches this backend as ams-backend:8080 over ams-net (401 = it got
+        // here and security answered). A warning, not a failure: the UI is deployed by its own
+        // job and may simply not be up yet, which does not make this backend build bad.
+        sh '''
+          FAILED=0
+
+          CODE=$(${CURL} -s -o /dev/null -w '%{http_code}' -L --max-time 15 "${UI_URL}/Login/ams/" || true)
+          if [ "$CODE" = "200" ]; then
+            echo "OK   ${UI_URL}/Login/ams/"
+          else
+            echo "WARN ${UI_URL}/Login/ams/ answered ${CODE:-nothing}, expected 200"
+            FAILED=1
+          fi
+
+          CODE=$(${CURL} -s -o /dev/null -w '%{http_code}' --max-time 15 "${UI_URL}/api/device/list/" || true)
+          if [ "$CODE" = "401" ]; then
+            echo "OK   ${UI_URL}/api -> ${CONTAINER} (401 without a token, as expected)"
+          else
+            echo "WARN ${UI_URL}/api/device/list/ answered ${CODE:-nothing}, expected 401 — the UI may not reach ${CONTAINER} on ${DOCKER_NETWORK}"
+            docker network inspect ${DOCKER_NETWORK} --format '{{range .Containers}}{{.Name}} {{end}}' || true
+            FAILED=1
+          fi
+
+          if [ "$FAILED" = "1" ]; then
+            echo "check that the AMS UI (ui-ams) is deployed and attached to ${DOCKER_NETWORK}, and that UI_URL is right"
+          fi
+        '''
       }
     }
 
     stage('Cleanup Old Images') {
       steps {
         sh '''
-          # Keep only the last 3 numbered builds. builder-<n> does not match ^[0-9]+$,
-          # so it is untouched here — post.always removes it.
-          docker images ${IMAGE} --format "{{.Tag}}" | grep -E '^[0-9]+$' | sort -rn | tail -n +4 | xargs -r -I {} docker rmi ${IMAGE}:{}
+          # Keep only last 3 builds. An old image still used by a container is skipped rather
+          # than failing the build — Docker refuses to remove it, and the deploy has already
+          # succeeded by this point.
+          docker images ${IMAGE} --format "{{.Tag}}" | grep -E '^[0-9]+$' | sort -rn | tail -n +4 | while read -r tag; do
+            docker rmi "${IMAGE}:${tag}" || echo "kept ${IMAGE}:${tag} — still in use by a container"
+          done
 
-          # Remove dangling images
-          docker image prune -f
+          # Remove dangling images — only those over a day old, so this never deletes layers
+          # another job on this server is building with right now.
+          docker image prune -f --filter "until=24h"
         '''
       }
     }
@@ -381,65 +469,65 @@ EOF
 
   post {
     success {
-      echo "Deployed ${IMAGE}:${TAG} (${env.GIT_SHA}) on port ${HOST_PORT}"
       script {
-        notify('SUCCESS', """The build was successful.
+        notify('✅', 'SUCCESS', """
+The build was successful!
 
 Job: ${env.JOB_NAME}
 Build: ${env.BUILD_URL}
+Branch: ${params.BRANCH}
 Commit: ${env.GIT_SHA}
-Image: ${IMAGE}:${TAG}
-Port: ${HOST_PORT} (container ${CONTAINER_PORT})
-Network: ${DOCKER_NETWORK}
+Image: ${env.IMAGE}:${env.TAG}
+Status: ${params.DEPLOY ? "Deployed and running on port ${env.HOST_PORT} (network ${env.DOCKER_NETWORK})" : 'Built only (DEPLOY unticked)'}
 Database: ${env.DB_NAME}
+
+Application URL: ${env.UI_URL}/Login/ams/
 
 Security Scans:
 - OWASP Dependency Check: Completed
 - Trivy Vulnerability Scan: Completed
 
 View Trivy Report: ${env.BUILD_URL}Trivy_Vulnerability_Report/
+View Test Results: ${env.BUILD_URL}testReport/
 """)
       }
     }
     failure {
       script {
-        notify('FAILED', """The build has failed.
+        notify('❌', 'FAILED', """
+The build has failed.
 
 Job: ${env.JOB_NAME}
 Build: ${env.BUILD_URL}
+Branch: ${params.BRANCH}
 Commit: ${env.GIT_SHA}
+Status: Failed
 
 Security Scans may have identified issues. Check:
 - Trivy Report: ${env.BUILD_URL}Trivy_Vulnerability_Report/
 - OWASP Report: ${env.BUILD_URL}artifact/dependency-check-report.html
+- Test Results: ${env.BUILD_URL}testReport/
 
-Console output: ${env.BUILD_URL}console
+Please check the console output: ${env.BUILD_URL}console
 """)
       }
     }
     always {
       script {
-        // A failure before any stage ran (e.g. a missing credential in environment) leaves
-        // no workspace, and sh would then dump a MissingContextVariableException trace that
+        // A failure before any stage ran (e.g. a missing credential in environment) leaves no
+        // workspace, and sh would then dump a MissingContextVariableException trace that
         // buries the real error.
-        if (!env.WORKSPACE) {
-          echo 'Cleanup skipped: the build failed before a workspace existed. See the first ERROR above.'
-          return
-        }
+        if (env.WORKSPACE) {
+          archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true, onlyIfSuccessful: true
 
-        // The env-file holds the database password. Deploy removes it, but a build that fails
-        // or is aborted in between would leave it in the workspace.
-        sh "rm -f .env.deploy || true"
+          // Archive container logs (2>&1: Spring writes its startup log to stderr)
+          sh 'docker logs ${CONTAINER} > docker-logs.txt 2>&1 || true'
+          archiveArtifacts artifacts: 'docker-logs.txt', allowEmptyArchive: true
 
-        // 2>&1 because Spring writes its startup log to stderr.
-        sh 'docker logs ${CONTAINER} > docker-logs.txt 2>&1 || true'
-        archiveArtifacts artifacts: 'docker-logs.txt', allowEmptyArchive: true
+          // Archive Trivy and OWASP reports
+          archiveArtifacts artifacts: 'trivy-*.txt, trivy-*.json, trivy-*.html, dependency-check-report.*', allowEmptyArchive: true
 
-        archiveArtifacts artifacts: 'trivy-*.txt, trivy-*.json, trivy-*.html', allowEmptyArchive: true
-
-        // Requires the HTML Publisher plugin; without it the report is still in the archived
-        // trivy-image-report.html, so skip rather than fail the build.
-        try {
+          // Publish HTML report (requires HTML Publisher plugin)
           publishHTML(target: [
             allowMissing: true,
             alwaysLinkToLastBuild: true,
@@ -448,24 +536,22 @@ Console output: ${env.BUILD_URL}console
             reportFiles: 'trivy-image-report.html',
             reportName: 'Trivy Vulnerability Report'
           ])
-        } catch (NoSuchMethodError e) {
-          echo 'HTML Publisher plugin not installed - Trivy report only archived as an artifact.'
-        }
 
-        // The builder image carries the whole Maven dependency tree — don't leave it behind.
-        sh "docker image rm -f ${IMAGE}:builder-${TAG} || true"
-        sh 'docker image prune -f --filter "until=168h" || true'
+          sh 'docker image prune -f --filter "until=168h" || true'
+        } else {
+          echo 'Cleanup skipped: the build failed before a workspace existed. See the first ERROR above.'
+        }
       }
     }
   }
 }
 
 // Mail is best-effort: missing SMTP config must not fail a good deploy.
-def notify(String result, String text) {
+def notify(String icon, String result, String body) {
   try {
     mail to: env.RECIPIENTS,
-         subject: "Jenkins Build ${result}: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
-         body: text
+         subject: "${icon} Jenkins Build ${result}: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
+         body: body
   } catch (e) {
     echo "Mail not sent (${e.message}). Configure SMTP under Manage Jenkins > System."
   }
