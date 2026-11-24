@@ -69,6 +69,20 @@ public class AssetService {
 	@Autowired
 	private AssetChangeLogRepository changeLogRepository;
 
+	/** Read-only lookups in the old per-type tables (see legacyDetails). */
+	@Autowired
+	private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+	/**
+	 * The OLD PER-TYPE TABLES, by device name in Device Master: table and its device-name column.
+	 * Fixed here (never built from input), so nothing a caller sends can name another table.
+	 */
+	private static final Map<String, String[]> LEGACY_TABLES = Map.of(
+			"desktop", new String[] { "ams_desktop_master", "desktop_number" },
+			"laptop", new String[] { "ams_laptop_master", "laptop_number" },
+			"tablet", new String[] { "ams_tablet_master", "tablet_number" },
+			"printer", new String[] { "ams_printer_master", "printer_number" });
+
 	/**
 	 * The machines of one device type, active AND inactive, newest first — every device added
 	 * through ADD DEVICE or BULK UPLOAD, deleted ones left out.
@@ -571,6 +585,153 @@ public class AssetService {
 	 * key is the real guarantee; this exists so the caller gets a readable message instead of
 	 * a constraint violation surfacing as a 500.
 	 */
+	/**
+	 * ONE DEVICE'S SAVED RECORD — the row in ams_add_device_master for this device type and
+	 * device name (case and surrounding spaces ignored), with every field entered on ADD DEVICE.
+	 * Null when that name has not been saved yet (or was deleted): it is then only a name in
+	 * Device Name Master, and there is nothing to show beyond type, model and name.
+	 */
+	@Transactional(readOnly = true)
+	public Map<String, Object> details(Long deviceId, String name) throws ApplicationException {
+		DeviceMaster device = requireDevice(deviceId);
+		String wanted = name == null ? "" : name.trim();
+		if (wanted.isEmpty()) {
+			throw new ApplicationException(IResponseCode.INVALID_DATA, "Device name is required.");
+		}
+		return assetMasterRepository.findByDeviceId(device.getId()).stream()
+				.filter(row -> row.getStatus() != Constants.STATUS_DELETED)
+				.filter(row -> row.getName() != null && wanted.equalsIgnoreCase(row.getName().trim()))
+				.findFirst()
+				.map(row -> {
+					Map<String, Object> m = allColumns(row, device);
+					m.put("source", "saved");
+					return m;
+				})
+				.orElseGet(() -> legacyDetails(device, wanted));
+	}
+
+	/**
+	 * A device NOT ADDED YET through ADD DEVICE: whatever the old per-type table
+	 * (ams_desktop_master, ams_laptop_master, ams_tablet_master, ams_printer_master) holds for
+	 * that name — every column, NULLs included — under the names the ADD DEVICE form reads.
+	 * No "id": it is not a saved device. "source" is "legacy". Null when no table has the name.
+	 */
+	private Map<String, Object> legacyDetails(DeviceMaster device, String name) {
+		String[] table = LEGACY_TABLES.get(String.valueOf(device.getDeviceName()).trim().toLowerCase());
+		if (table == null) {
+			return null;
+		}
+		List<Map<String, Object>> found = jdbcTemplate.queryForList(
+				"SELECT * FROM " + table[0] + " WHERE LOWER(TRIM(" + table[1] + ")) = LOWER(?) AND status <> ?",
+				name, Constants.STATUS_DELETED);
+		if (found.isEmpty()) {
+			return null;
+		}
+		Map<String, Object> m = new LinkedHashMap<>();
+		found.get(0).forEach((column, value) -> {
+			if ("id".equals(column)) {
+				m.put("legacy_id", value);
+			} else if (table[1].equals(column)) {
+				m.put("name", value);
+			} else if ("emp_code".equals(column)) {
+				m.put("employee_code", value);
+			} else if ("user_name".equals(column)) {
+				m.put("employee_name", value);
+			} else {
+				m.put(column, text(value));
+			}
+		});
+		m.put("device_id", device.getId());
+		m.put("device_name", device.getDeviceName());
+		m.put("source", "legacy");
+		m.put("legacy_table", table[0]);
+		return m;
+	}
+
+	/**
+	 * EVERY COLUMN of the device's ams_add_device_master row — NULL ones included (as null), so
+	 * the screen gets the whole record, not only the filled fields. Keys are the names the ADD
+	 * DEVICE form reads (AssetBO's), plus the table's own columns that form has no field for.
+	 */
+	private Map<String, Object> allColumns(AssetMaster row, DeviceMaster device) {
+		Map<String, Object> m = new LinkedHashMap<>();
+		m.put("id", row.getId());
+		m.put("device_id", row.getDeviceId());
+		m.put("device_name", device.getDeviceName());
+		m.put("name", row.getName());
+		m.put("po_no", row.getPoNo());
+		m.put("asset_code", row.getAssetCode());
+		m.put("asset_sn", row.getAssetSn());
+		m.put("device_status", row.getDeviceStatus());
+		m.put("ip_address", row.getIpAddress());
+		m.put("plant", row.getPlant());
+		m.put("department", row.getDepartment());
+		m.put("location", row.getLocation());
+		m.put("model", row.getModel());
+		m.put("service_tag", row.getServiceTag());
+		m.put("exp_service_code", row.getExpServiceCode());
+		// assigned_employee_code / assigned_to_employee, under the names the form uses.
+		m.put("employee_code", row.getEmployeeCode());
+		m.put("employee_name", row.getEmployeeName());
+		m.put("added_by_emp_code", row.getAddedByEmpCode());
+		m.put("added_by_emp_name", row.getAddedByEmpName());
+		m.put("processor", row.getProcessor());
+		m.put("ram", row.getRam());
+		m.put("rom", row.getRom());
+		m.put("hdd", row.getHdd());
+		m.put("external_processor", row.getExternalProcessor());
+		m.put("external_ram", row.getExternalRam());
+		m.put("external_rom", row.getExternalRom());
+		m.put("external_hdd", row.getExternalHdd());
+		m.put("os", row.getOs());
+		m.put("os_service_pack", row.getOsServicePack());
+		m.put("ms_office", row.getMsOffice());
+		m.put("charger", row.getCharger());
+		m.put("keyboard", row.getKeyboard());
+		m.put("mouse", row.getMouse());
+		m.put("software_1", row.getSoftware1());
+		m.put("software_2", row.getSoftware2());
+		m.put("classification", row.getClassification());
+		m.put("system_type", row.getSystemType());
+		m.put("warranty_status", row.getWarrantyStatus());
+		m.put("warranty_start_date", text(row.getWarrantyStartDate()));
+		m.put("last_date_of_warranty", text(row.getLastDateOfWarranty()));
+		m.put("total_warranty_years", row.getTotalWarrantyYears());
+		// The age as the form shows it (worked out today), and as stored in the table.
+		String derivedAge = deriveAge(row);
+		m.put("age", derivedAge != null ? derivedAge : row.getAge());
+		m.put("age_stored", row.getAge());
+		m.put("description", row.getDescription());
+		m.put("create_date", text(row.getCreateDate()));
+		m.put("create_time", text(row.getCreateTime()));
+		m.put("status", row.getStatus());
+		m.put("reg_by", row.getRegBy());
+		m.put("reg_time", row.getRegTime());
+		m.put("last_action_id", row.getLastActionId());
+		m.put("last_action_date", text(row.getLastActionDate()));
+		m.put("last_action_remarks", row.getLastActionRemarks());
+		m.put("last_action_on", text(row.getLastActionOn()));
+		m.put("reference_no", row.getReferenceNo());
+		m.put("ref_fy", row.getRefFy());
+		m.put("ref_seq", row.getRefSeq());
+		m.put("added_via", row.getAddedVia());
+		return m;
+	}
+
+	/** A date / time as plain text, exactly as the table shows it (2026-11-21, 12:22:19, 2026-10-03 16:16:09), or null. */
+	private static String text(Object value) {
+		if (value == null) {
+			return null;
+		}
+		if (value instanceof java.time.LocalDateTime dt) {
+			return dt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+		}
+		if (value instanceof LocalTime t) {
+			return t.format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+		}
+		return value.toString();
+	}
+
 	private AssetMaster findIncludingDeleted(Long deviceId, String name) {
 		return assetMasterRepository.findByDeviceId(deviceId).stream()
 				.filter(row -> name.equalsIgnoreCase(row.getName()))

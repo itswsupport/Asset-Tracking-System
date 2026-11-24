@@ -64,8 +64,11 @@ public class AssetActionHistory {
 	 * What happened, stored as the words chosen — "User Left", "Asset Transferred", … — not
 	 * as a number. Not to be confused with `status` below, which is the row's own
 	 * active/deleted flag.
+	 *
+	 * The column is allocation_status (renamed from action_status); the API field the screens
+	 * send and read is still "action_status" (AssetActionHistoryBO), so they are unchanged.
 	 */
-	@Column(name = "action_status", length = 50)
+	@Column(name = "allocation_status", length = 50)
 	private String actionStatus;
 
 	/**

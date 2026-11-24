@@ -713,6 +713,25 @@ public class MasterServiceImpl implements IMasterService {
 	}
 
 	/**
+	 * The company / companies picked on the Login Access form — one, two or all of them
+	 * ("RUCHA ENGINEERS PVT LTD" or "BURLYFIELD BIOTECH PVT. LTD,RUCHA ENGINEERS PVT LTD").
+	 * Stored in company_name comma-separated, like plant_code: trimmed, without repeats and
+	 * A–Z, so the same companies picked in another order are saved the same. At least one.
+	 */
+	private static String requireCompanies(String names) throws ApplicationException {
+		String joined = names == null ? "" : java.util.Arrays.stream(names.split(","))
+				.map(String::trim)
+				.filter(s -> !s.isEmpty())
+				.distinct()
+				.sorted()
+				.collect(Collectors.joining(","));
+		if (joined.isEmpty()) {
+			throw new ApplicationException(IResponseCode.INVALID_DATA, "Select at least one company.");
+		}
+		return joined;
+	}
+
+	/**
 	 * THE ROLE(S) OF A LOGIN ACCESS ROW, from Role Master.
 	 *
 	 * The screen sends the roles picked by id (role_id "1,4"): role_id keeps those ids and role
@@ -752,6 +771,7 @@ public class MasterServiceImpl implements IMasterService {
 
 		String deviceIds = requireDeviceTypes(in.getDevice_ids());
 		String plantCodes = requirePlants(in.getPlant_code());
+		String companies = requireCompanies(in.getCompany_name());
 
 		/*
 		 * The employee is verified against the shared master rather than trusted from the
@@ -811,7 +831,7 @@ public class MasterServiceImpl implements IMasterService {
 					return fresh;
 				});
 
-		row.setCompanyName(in.getCompany_name());
+		row.setCompanyName(companies);
 		row.setPlantCode(plantCodes);
 		row.setDeviceIds(deviceIds);
 		String first = employee.getEmpFname() == null ? "" : employee.getEmpFname().trim();
@@ -846,6 +866,7 @@ public class MasterServiceImpl implements IMasterService {
 
 		String deviceIds = requireDeviceTypes(in.getDevice_ids());
 		String plantCodes = requirePlants(in.getPlant_code());
+		String companies = requireCompanies(in.getCompany_name());
 
 		/*
 		 * The employee can be changed, but emp_code is UNIQUE and is the identity login looks
@@ -875,7 +896,7 @@ public class MasterServiceImpl implements IMasterService {
 			row.setEmpName((f + " " + l).trim());
 		}
 
-		row.setCompanyName(in.getCompany_name());
+		row.setCompanyName(companies);
 		row.setPlantCode(plantCodes);
 		row.setDeviceIds(deviceIds);
 		// Same as the save; a role this person already holds stays allowed even if inactive.

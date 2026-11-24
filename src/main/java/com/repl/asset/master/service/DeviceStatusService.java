@@ -87,10 +87,33 @@ public class DeviceStatusService {
 			throw new ApplicationException(IResponseCode.INVALID_DATA, "Device is required.");
 		}
 
+		/*
+		 * ACTIVE ONLY (status = 1) — on Open, Assigned and Total Devices and their counts. A
+		 * device switched off (0) or deleted (-1) in ams_add_device_master is not listed.
+		 */
 		List<AssetMaster> assets = assetMasterRepository.findByDeviceId(deviceId).stream()
-				.filter(a -> a.getStatus() != Constants.STATUS_DELETED)
+				.filter(a -> a.getStatus() == Constants.STATUS_ACTIVE)
 				.sorted(Comparator.comparing(AssetMaster::getId).reversed())
 				.toList();
+
+		/*
+		 * Names switched off (0) or deleted (-1) in Device Name Master. A saved device under one
+		 * of these names is not listed either — the name itself is out of circulation.
+		 */
+		/*
+		 * Saved devices switched off (0) in ams_add_device_master. Their name is not listed even
+		 * when the name itself is active — otherwise it would show as a name never added.
+		 */
+		Set<String> inactiveDeviceNames = assetMasterRepository.findByDeviceId(deviceId).stream()
+				.filter(a -> a.getStatus() == Constants.STATUS_INACTIVE)
+				.map(a -> normalise(a.getName()))
+				.collect(Collectors.toSet());
+
+		Set<String> retiredNames = new HashSet<>();
+		for (int s : new int[] { Constants.STATUS_INACTIVE, Constants.STATUS_DELETED }) {
+			deviceNameRepository.findByDeviceIdAndStatus(deviceId, s)
+					.forEach(n -> retiredNames.add(normalise(n.getDeviceName())));
+		}
 
 		// Every machine's history in one query, grouped by machine.
 		Map<Long, List<AssetActionHistory>> historyByAsset = assets.isEmpty()
@@ -117,6 +140,7 @@ public class DeviceStatusService {
 		// Only this type's active names, read from the database — not every name of every type.
 		deviceNameRepository.findByDeviceIdAndStatus(deviceId, Constants.STATUS_ACTIVE).stream()
 				.filter(n -> notBlank(n.getDeviceName()))
+				.filter(n -> !inactiveDeviceNames.contains(normalise(n.getDeviceName())))
 				.sorted(Comparator.comparing(DeviceNameMaster::getId).reversed())
 				.forEach(n -> {
 					String state = DeviceNameMaster.ALLOCATION_ASSIGNED.equalsIgnoreCase(n.getAllocationStatus())
@@ -139,6 +163,8 @@ public class DeviceStatusService {
 		boolean printer = allocationService.isPrinter(deviceId);
 		assets.stream()
 				.filter(a -> !shown.contains(a.getId()))
+				// Its name is inactive / deleted in Device Name Master — not shown (see retiredNames).
+				.filter(a -> !retiredNames.contains(normalise(a.getName())))
 				.forEach(a -> {
 					List<AssetActionHistory> entries = historyByAsset.getOrDefault(a.getId(), List.of());
 					boolean held = entries.stream().anyMatch(h -> h.getEndDate() == null);

@@ -63,6 +63,24 @@ public class AssetController extends BaseController {
 	}
 
 	/**
+	 * GET /asset/details?device_id=&name= — one device's saved record from ams_add_device_master,
+	 * every field entered on ADD DEVICE. response is null when that name has not been saved yet.
+	 */
+	@GetMapping(value = { "/asset/details", "/asset/details/" })
+	public ResponseEntity<BaseResponseBO> details(@RequestParam("device_id") Long deviceId,
+			@RequestParam("name") String name) {
+		try {
+			return getResponseModel(service.details(deviceId, name), IResponseCode.SUCCESS,
+					IResponseMessage.SUCCESS, null);
+		} catch (ApplicationException e) {
+			return getResponseModel(null, e.getCode(), e.getMessage(), null);
+		} catch (Exception e) {
+			logger.error("Failed to load the device details", e);
+			return getResponseModel(null, IResponseCode.SERVER_ERROR, IResponseMessage.SERVER_ERROR, null);
+		}
+	}
+
+	/**
 	 * GET /asset/nextreference?device_id=&name= — the reference number the next machine of this
 	 * device type would get, e.g. PR26SOU646001. A preview for ADD DEVICE; nothing is reserved.
 	 */
